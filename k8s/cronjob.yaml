@@ -1,0 +1,42 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: aiautonomoustraderbot
+  namespace: autonomoustrading
+spec:
+  schedule: "3 17 * * *" # daily at 9 AM UTC
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  concurrencyPolicy: Forbid # never run two instances simultaneously
+  jobTemplate:
+    spec:
+      backoffLimit: 0 # run-once-and-exit: no retries
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+          - name: trader-bot
+            image: guestros/aiautonomoustraderbot:latest
+            imagePullPolicy: Always
+            envFrom:
+            - secretRef:
+                name: trader-bot-env
+            env:
+            - name: BROWSER_CDP_URL
+              value: "http://selenium-chrome.autonomoustrading:9222"
+            resources:
+              limits:
+                cpu: "1"
+                memory: 1Gi
+              requests:
+                cpu: 25m
+                memory: 25Mi
+            volumeMounts:
+            # agent memory — PVC with subPath for single-file mount
+            - name: memory-pvc
+              mountPath: /app/agent_memory.json
+              subPath: agent_memory.json
+          volumes:
+          - name: memory-pvc
+            persistentVolumeClaim:
+              claimName: trader-bot-memory

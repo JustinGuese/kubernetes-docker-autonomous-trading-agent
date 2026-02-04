@@ -1,0 +1,55 @@
+---
+# Headless Chrome — standalone Selenium image, CDP on 9222.
+# The trader-bot CronJob connects to it via BROWSER_CDP_URL.
+apiVersion: v1
+kind: Service
+metadata:
+  name: selenium-chrome
+  namespace: autonomoustrading
+spec:
+  selector:
+    app: selenium-chrome
+  ports:
+  - name: cdp
+    port: 9222
+    targetPort: 9222
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: selenium-chrome
+  namespace: autonomoustrading
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: selenium-chrome
+  template:
+    metadata:
+      labels:
+        app: selenium-chrome
+    spec:
+      containers:
+      - name: chrome
+        image: selenium/standalone-chrome:latest
+        ports:
+        - containerPort: 9222
+        env:
+        - name: SE_OPTS
+          value: "--log-level=WARNING"
+        resources:
+          requests:
+            cpu: 25m
+            memory: 128Mi
+          limits:
+            cpu: "1"
+            memory: 2Gi
+        # Chrome requires /dev/shm; emulate with an emptyDir tmpfs
+        volumeMounts:
+        - name: shm
+          mountPath: /dev/shm
+      volumes:
+      - name: shm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 2Gi

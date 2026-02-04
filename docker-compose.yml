@@ -1,0 +1,42 @@
+version: "3.8"
+
+services:
+  # ── headless Chrome sidecar ───────────────────────────────────
+  chrome:
+    image: selenium/standalone-chrome:latest
+    shm_size: "2gb"           # Chrome needs shared memory
+    environment:
+      - SE_OPTS=--log-level=WARNING
+    ports:
+      - "9222:9222"           # expose CDP port to host for debugging
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:9222/json | head -c 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+
+  # ── main bot ──────────────────────────────────────────────────
+  trader-bot:
+    build: .
+    env_file:
+      - .env
+    environment:
+      - BROWSER_CDP_URL=http://chrome:9222
+    depends_on:
+      chrome:
+        condition: service_healthy
+    volumes:
+      # core/ and policies/ are read-only — defense in depth alongside sandbox path checks
+      - ./core:/app/core:ro
+      - ./policies:/app/policies:ro
+      # tools/ and experiments/ are writable (agent self-modification)
+      - ./tools:/app/tools
+      - ./experiments:/app/experiments
+      # Persist agent memory across runs
+      - ./agent_memory.json:/app/agent_memory.json
+    # Resource guardrails
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
