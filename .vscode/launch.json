@@ -17,25 +17,20 @@
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
       "envFile": "${workspaceFolder}/.env",
-      "justMyCode": false
     },
     {
       "name": "Debug perceive_node",
-      "type": "python",
+      "type": "debugpy",
       "request": "launch",
       "program": "${workspaceFolder}/main.py",
       "cwd": "${workspaceFolder}",
       "env": {
         "PYTHONPATH": "${workspaceFolder}"
       },
-      "justMyCode": false,
-      "breakpoint": {
-        "enabled": true
-      }
     },
     {
       "name": "pytest",
-      "type": "python",
+      "type": "debugpy",
       "request": "launch",
       "module": "pytest",
       "args": ["tests/", "-v"],
@@ -43,7 +38,6 @@
       "env": {
         "PYTHONPATH": "${workspaceFolder}"
       },
-      "justMyCode": false
     }
   ]
 }

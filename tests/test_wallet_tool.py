@@ -1,68 +1,32 @@
-"""Tests for tools/wallet_tool.py with mocked Solana RPC client.
-
-The solana/solders native extensions may not be available in all environments,
-so we inject mock modules into sys.modules before importing wallet_tool.
-"""
+"""Tests for tools/wallet_tool.py with mocked Solana RPC client."""
 
 from __future__ import annotations
 
-import sys
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import base58
 import pytest
+from solders.hash import Hash
+from solders.keypair import Keypair
 
-# ── inject fake solana/solders modules ────────────────────────────────────────
-# Must happen before any import of tools.wallet_tool.
-
-_mock_keypair_cls = MagicMock()
-_mock_pubkey_cls = MagicMock()
-_mock_transfer_params_cls = MagicMock()
-_mock_transfer_fn = MagicMock()
-_mock_transaction_cls = MagicMock()
-
-# solders sub-packages
-_solders = MagicMock()
-_solders_keypair = MagicMock()
-_solders_keypair.Keypair = _mock_keypair_cls
-_solders_pubkey = MagicMock()
-_solders_pubkey.Pubkey = _mock_pubkey_cls
-_solders_system_program = MagicMock()
-_solders_system_program.TransferParams = _mock_transfer_params_cls
-_solders_system_program.transfer = _mock_transfer_fn
-_solders_transaction = MagicMock()
-_solders_transaction.Transaction = _mock_transaction_cls
-
-# solana sub-packages
-_solana = MagicMock()
-_solana_rpc = MagicMock()
-_solana_rpc_api = MagicMock()
-
-sys.modules.setdefault("solders", _solders)
-sys.modules.setdefault("solders.keypair", _solders_keypair)
-sys.modules.setdefault("solders.pubkey", _solders_pubkey)
-sys.modules.setdefault("solders.system_program", _solders_system_program)
-sys.modules.setdefault("solders.transaction", _solders_transaction)
-sys.modules.setdefault("solana", _solana)
-sys.modules.setdefault("solana.rpc", _solana_rpc)
-sys.modules.setdefault("solana.rpc.api", _solana_rpc_api)
-
-# Now we can safely import WalletTool
-from tools.wallet_tool import WalletTool  # noqa: E402
+from tools.wallet_tool import WalletTool
 
 # ── fixtures ──────────────────────────────────────────────────────────────────
 
 
 @pytest.fixture
 def mock_wallet():
-    """Return a WalletTool with a fully mocked Client."""
-    fake_key_b58 = base58.b58encode(b"\x01" * 64).decode()
-
+    """Return a WalletTool with a fully mocked Client and a valid keypair."""
+    kp = Keypair()
+    valid_key_b58 = base58.b58encode(bytes(kp)).decode()
     mock_client = MagicMock()
-    _solana_rpc_api.Client.return_value = mock_client
+    # Real blockhash so txn.sign() in send() succeeds
+    mock_bh = MagicMock()
+    mock_bh.blockhash = Hash.from_bytes(bytes(32))
+    mock_client.get_latest_blockhash.return_value = MagicMock(value=mock_bh)
 
-    tool = WalletTool(fake_key_b58, "https://api.devnet.solana.com")
-    tool.client = mock_client  # ensure we use our mock
+    with patch("tools.wallet_tool.Client", return_value=mock_client):
+        tool = WalletTool(valid_key_b58, "https://api.devnet.solana.com")
     return tool, mock_client
 
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import tempfile
@@ -14,8 +15,20 @@ MEMORY_PATH = Path("agent_memory.json")
 _DEFAULT_STATE: dict[str, Any] = {
     "daily_spend_sol": 0.0,
     "daily_spend_date": "",  # ISO date string; reset when stale
+    "daily_swap_usd": 0.0,
+    "daily_swap_date": "",
     "reflections": [],
     "trades": [],             # structured action log — see append_trade()
+    # Portfolio-aware benchmark: compare total portfolio value vs a simple
+    # SOL buy-and-hold from the same starting USD value. Fields populated lazily.
+    "benchmark": {
+        "start_date": "",
+        "start_portfolio_usd": 0.0,
+        "start_prices": {},
+    },
+    # Token positions and swap history are populated lazily.
+    "positions": {},
+    "swap_history": [],
 }
 
 # How many chars of action_result to persist per trade
@@ -33,13 +46,21 @@ class MemoryStore:
     def load(self) -> dict[str, Any]:
         """Read state from disk.  Returns fresh default if file is missing."""
         if not self.path.exists():
-            return dict(_DEFAULT_STATE)
+            return copy.deepcopy(_DEFAULT_STATE)
         with open(self.path) as fh:
             state = json.load(fh)
-        # Auto-reset daily spend when the date has changed
-        if state.get("daily_spend_date") != date.today().isoformat():
+        # Auto-reset daily spend / swap when the date has changed
+        today = date.today().isoformat()
+        mutated = False
+        if state.get("daily_spend_date") != today:
             state["daily_spend_sol"] = 0.0
-            state["daily_spend_date"] = date.today().isoformat()
+            state["daily_spend_date"] = today
+            mutated = True
+        if state.get("daily_swap_date") != today:
+            state["daily_swap_usd"] = 0.0
+            state["daily_swap_date"] = today
+            mutated = True
+        if mutated:
             self.save(state)
         return state
 
@@ -55,11 +76,43 @@ class MemoryStore:
             os.unlink(tmp)
             raise
 
+    # ── benchmark helpers ──────────────────────────────────────────
+
+    def ensure_benchmark_initialized(
+        self,
+        portfolio_usd_now: float,
+        prices_now: dict[str, float],
+    ) -> dict[str, Any]:
+        """Ensure benchmark is populated; return updated full state.
+
+        On first call, records today's date, the current total portfolio USD
+        value, and the current token prices as the reference point.
+        Subsequent calls leave the benchmark fixed.
+        """
+        state = self.load()
+        bench = state.get("benchmark") or {}
+        if not bench.get("start_date"):
+            bench = {
+                "start_date": date.today().isoformat(),
+                "start_portfolio_usd": float(portfolio_usd_now),
+                "start_prices": {k: float(v) for k, v in prices_now.items()},
+            }
+            state["benchmark"] = bench
+            self.save(state)
+        return state
+
     def add_spend(self, amount_sol: float) -> None:
         """Increment daily spend (re-reads from disk first)."""
         state = self.load()
         state["daily_spend_sol"] = state.get("daily_spend_sol", 0.0) + amount_sol
         state["daily_spend_date"] = date.today().isoformat()
+        self.save(state)
+
+    def add_swap_usd(self, amount_usd: float) -> None:
+        """Increment daily swap notional (re-reads from disk first)."""
+        state = self.load()
+        state["daily_swap_usd"] = state.get("daily_swap_usd", 0.0) + float(amount_usd)
+        state["daily_swap_date"] = date.today().isoformat()
         self.save(state)
 
     def append_reflection(self, text: str) -> None:

@@ -39,6 +39,32 @@ class PolicyEngine:
         if not destination or len(destination) < 32:
             raise PolicyViolation("destination does not look like a valid Solana address")
 
+    # ── swaps ─────────────────────────────────────────────────────
+
+    def check_swap(self, from_token: str, to_token: str, amount_usd: float) -> None:
+        """Validate a proposed swap against policy rules.
+
+        We approximate risk in USD terms; callers should pass an estimated USD
+        notional for the swap, based on current prices.
+        """
+        cfg = self.config.policy
+        if from_token == to_token:
+            raise PolicyViolation("swap from_token and to_token must differ")
+        if amount_usd <= 0:
+            raise PolicyViolation("swap amount_usd must be positive")
+        if amount_usd > cfg.max_swap_usd_per_tx:
+            raise PolicyViolation(
+                f"swap notional {amount_usd} exceeds MAX_SWAP_USD_PER_TX {cfg.max_swap_usd_per_tx}"
+            )
+
+        state = self.memory.load()
+        daily_swap = state.get("daily_swap_usd", 0.0)
+        projected = daily_swap + amount_usd
+        if projected > cfg.daily_swap_cap_usd:
+            raise PolicyViolation(
+                f"Projected daily swap volume {projected} exceeds cap {cfg.daily_swap_cap_usd}"
+            )
+
     # ── browser ───────────────────────────────────────────────────
 
     def check_browser_url(self, url: str) -> None:

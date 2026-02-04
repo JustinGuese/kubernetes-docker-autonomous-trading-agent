@@ -151,3 +151,36 @@ class TestLocDelta:
         eng = PolicyEngine(_make_config(max_loc_delta=200), MemoryStore())
         with pytest.raises(PolicyViolation, match="LOC delta"):
             eng.check_loc_delta(-250)
+
+
+# ── swap ─────────────────────────────────────────────────────────────────────
+
+
+class TestSwap:
+    """PolicyEngine.check_swap: same token, amount, per-tx cap, daily cap."""
+
+    def test_same_token_raises(self, engine: PolicyEngine) -> None:
+        with pytest.raises(PolicyViolation, match="must differ"):
+            engine.check_swap("SOL", "SOL", 10.0)
+
+    def test_zero_amount_raises(self, engine: PolicyEngine) -> None:
+        with pytest.raises(PolicyViolation, match="must be positive"):
+            engine.check_swap("SOL", "USDC", 0.0)
+
+    def test_negative_amount_raises(self, engine: PolicyEngine) -> None:
+        with pytest.raises(PolicyViolation, match="must be positive"):
+            engine.check_swap("SOL", "USDC", -5.0)
+
+    def test_exceeds_per_tx_cap_raises(self, engine: PolicyEngine) -> None:
+        # Default max_swap_usd_per_tx is 50
+        with pytest.raises(PolicyViolation, match="MAX_SWAP_USD_PER_TX"):
+            engine.check_swap("SOL", "USDC", 51.0)
+
+    def test_exceeds_daily_cap_raises(self, memory: MemoryStore) -> None:
+        memory.add_swap_usd(180.0)  # default daily_swap_cap_usd is 200
+        eng = PolicyEngine(_make_config(), memory)
+        with pytest.raises(PolicyViolation, match="daily swap volume"):
+            eng.check_swap("SOL", "USDC", 25.0)
+
+    def test_within_limits_passes(self, engine: PolicyEngine) -> None:
+        engine.check_swap("SOL", "USDC", 10.0)

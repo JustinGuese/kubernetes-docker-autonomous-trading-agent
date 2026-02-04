@@ -42,6 +42,32 @@ class TATool:
             v = last.get(col)
             return f"{v:.4f}" if pd.notna(v) else "N/A"
 
+        # Simple qualitative tags derived from core indicators to help the LLM
+        # map numbers into rough regimes (trend + momentum).
+        sma_fast = last.get("trend_sma_fast")
+        sma_slow = last.get("trend_sma_slow")
+        rsi = last.get("momentum_rsi")
+
+        if pd.notna(sma_fast) and pd.notna(sma_slow):
+            if sma_fast > sma_slow * 1.01:
+                trend_tag = "uptrend"
+            elif sma_fast < sma_slow * 0.99:
+                trend_tag = "downtrend"
+            else:
+                trend_tag = "sideways"
+        else:
+            trend_tag = "unknown"
+
+        if pd.notna(rsi):
+            if rsi >= 70:
+                momentum_tag = "overbought"
+            elif rsi <= 30:
+                momentum_tag = "oversold"
+            else:
+                momentum_tag = "neutral"
+        else:
+            momentum_tag = "unknown"
+
         # ── build summary ─────────────────────────────────────────────
         lines = [
             f"[{symbol}] close={close:.4f}",
@@ -57,5 +83,7 @@ class TATool:
             f"  ATR={_val('volatility_atr')}",
             # Volume
             f"  OBV={_val('volume_obv')}  VWAP={_val('volume_vwap')}",
+            # Qualitative regimes
+            f"  trend_tag={trend_tag}  momentum_tag={momentum_tag}",
         ]
         return "\n".join(lines)

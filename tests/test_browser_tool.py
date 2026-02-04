@@ -30,6 +30,7 @@ class TestScrapeAsync:
 
         mock_playwright = AsyncMock()
         mock_playwright.chromium.launch.return_value = mock_browser
+        mock_playwright.chromium.connect_over_cdp = AsyncMock(return_value=mock_browser)
 
         mock_ctx = AsyncMock()
         mock_ctx.__aenter__.return_value = mock_playwright
@@ -53,6 +54,7 @@ class TestScrapeAsync:
 
         mock_playwright = AsyncMock()
         mock_playwright.chromium.launch.return_value = mock_browser
+        mock_playwright.chromium.connect_over_cdp = AsyncMock(return_value=mock_browser)
 
         mock_ctx = AsyncMock()
         mock_ctx.__aenter__.return_value = mock_playwright

@@ -177,6 +177,7 @@ persist memory + exit
 - **`wallet_send`** — send SOL to an address (gated by policy)
 - **`scrape`** — fetch any URL (no restrictions; text truncated to 8k chars)
 - **`extend_code`** — write new tool code (rolled back if tests fail)
+- **`swap`** — exchange Solana tokens via Jupiter DEX (e.g., SOL↔USDC); swaps are risk-gated by per-trade and daily USD caps and tracked in the agent's portfolio state
 - **`noop`** — do nothing (safest choice when uncertain)
 
 All actions persisted to memory with reflections; agent learns from history across runs.
@@ -193,6 +194,15 @@ Stored in `agent_memory.json`:
 {
   "daily_spend_sol": 0.0,
   "daily_spend_date": "2026-02-04",
+  "daily_swap_usd": 0.0,
+  "daily_swap_date": "2026-02-04",
+  "benchmark": {
+    "start_date": "2026-02-04",
+    "start_portfolio_usd": 100.0,
+    "start_prices": { "SOL": 100.0 }
+  },
+  "positions": { "SOL": { "amount": 1.0, "cost_basis_usd": 100.0, "last_updated": "2026-02-04" } },
+  "swap_history": [],
   "reflections": [{ "date": "2026-02-04", "text": "plan={...} | result=noop" }]
 }
 ```
@@ -263,6 +273,8 @@ CONFIDENCE_THRESHOLD=0.6               # Min LLM confidence to execute (0-1)
 MAX_SOL_PER_TX=0.1                     # Hard cap per transaction (SOL)
 DAILY_SPEND_CAP_SOL=0.5                # Rolling daily cap (resets at midnight UTC)
 MAX_LOC_DELTA=200                      # Max lines-of-code per self-modification
+MAX_SWAP_USD_PER_TX=50.0               # Approximate max USD notional per swap
+DAILY_SWAP_CAP_USD=200.0               # Approximate daily USD swap cap
 ```
 
 ---
