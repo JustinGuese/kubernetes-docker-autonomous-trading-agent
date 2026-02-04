@@ -36,7 +36,12 @@ class BrowserTool:
                 browser = await p.chromium.launch(headless=True)
 
             page = await browser.new_page()
-            await page.goto(url, wait_until="networkidle", timeout=30_000)
+            try:
+                await page.goto(url, wait_until="networkidle", timeout=30_000)
+                logger.info("page load succeeded for %s (status %s)", url, page.url)
+            except Exception as exc:
+                logger.warning("page load failed for %s: %s", url, exc)
+                raise
             text = await page.inner_text("body")
 
             # only close if we launched it; remote browsers stay alive

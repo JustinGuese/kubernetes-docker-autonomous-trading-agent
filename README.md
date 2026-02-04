@@ -23,12 +23,14 @@ cp .env.example .env
 ```
 
 Edit `.env` and provide:
+
 - `OPENROUTER_API_KEY` — your OpenRouter API key (for LLM calls)
 - `SOLANA_PRIVATE_KEY` — base58-encoded devnet keypair (see below)
 - `GITHUB_TOKEN` — personal access token (for self-modification pushes)
 - `GITHUB_REPO` — owner/repo (e.g., `jguese/aiAutonomousTraderBot`)
 
 Optional (defaults shown):
+
 - `SOLANA_RPC_URL` — defaults to `https://api.devnet.solana.com`
 - `CONFIDENCE_THRESHOLD` — defaults to `0.6` (min LLM confidence to execute)
 - `MAX_SOL_PER_TX` — defaults to `0.1` SOL per transaction
@@ -69,17 +71,20 @@ with open('~/.config/solana/id.json') as f:
 You have two options:
 
 **Web faucet (easiest):**
+
 - Go to **https://faucet.solana.com**
 - Paste your public key
 - Select **Devnet**
 - Request SOL (usually 2-5 SOL per request)
 
 **CLI:**
+
 ```bash
 solana airdrop 2 <your-public-key> --url https://api.devnet.solana.com
 ```
 
 Verify the balance landed:
+
 ```bash
 python3 checkbalance.py
 ```
@@ -97,6 +102,7 @@ python main.py
 ```
 
 The agent will:
+
 1. **PERCEIVE** — scrape default crypto data sites (DEXScreener, CoinGecko, CoinMarketCap)
 2. **REASON** — send observations to the LLM; get back a structured plan
 3. **ACT** — execute the plan (send SOL, scrape a URL, write code, or noop)
@@ -119,8 +125,9 @@ The container has read-only mounts on `core/` and `policies/` (defense in depth)
 3. Apply:
 
 ```bash
-kubectl apply -f k8s/secret.yaml
-kubectl apply -f k8s/cronjob.yaml
+kubectl create namespace autonomoustrading
+kubectl create secret generic trader-bot-env --from-file=.env -n autonomoustrading
+kubectl apply -f k8s/
 ```
 
 The CronJob runs at **9 AM UTC daily**.
@@ -143,18 +150,18 @@ persist memory + exit
 
 ### Key Files
 
-| File | Purpose |
-|------|---------|
-| `core/config.py` | Load and validate env vars; hardcoded domain allowlist |
-| `core/memory.py` | Atomic JSON state: daily spend, reflections |
-| `core/policy_engine.py` | Gate every action: wallet sends, git commits |
-| `core/sandbox.py` | Self-mod pipeline: write → pytest → ruff → git push |
-| `core/agent.py` | LangGraph state machine |
-| `tools/wallet_tool.py` | Solana devnet balance, send, history |
-| `tools/browser_tool.py` | Playwright scraper (no domain restrictions) |
-| `tools/git_tool.py` | Subprocess git; ephemeral token injection |
-| `tools/fs_tool.py` | File read/list; path-traversal defense |
-| `policies/default_policies.py` | Human-readable policy spec |
+| File                           | Purpose                                                |
+| ------------------------------ | ------------------------------------------------------ |
+| `core/config.py`               | Load and validate env vars; hardcoded domain allowlist |
+| `core/memory.py`               | Atomic JSON state: daily spend, reflections            |
+| `core/policy_engine.py`        | Gate every action: wallet sends, git commits           |
+| `core/sandbox.py`              | Self-mod pipeline: write → pytest → ruff → git push    |
+| `core/agent.py`                | LangGraph state machine                                |
+| `tools/wallet_tool.py`         | Solana devnet balance, send, history                   |
+| `tools/browser_tool.py`        | Playwright scraper (no domain restrictions)            |
+| `tools/git_tool.py`            | Subprocess git; ephemeral token injection              |
+| `tools/fs_tool.py`             | File read/list; path-traversal defense                 |
+| `policies/default_policies.py` | Human-readable policy spec                             |
 
 ### Safety Features
 
@@ -186,9 +193,7 @@ Stored in `agent_memory.json`:
 {
   "daily_spend_sol": 0.0,
   "daily_spend_date": "2026-02-04",
-  "reflections": [
-    {"date": "2026-02-04", "text": "plan={...} | result=noop"}
-  ]
+  "reflections": [{ "date": "2026-02-04", "text": "plan={...} | result=noop" }]
 }
 ```
 
@@ -289,11 +294,13 @@ CONFIDENCE_THRESHOLD="0.6"
 ### `ModuleNotFoundError: No module named 'solders'`
 
 Install dependencies:
+
 ```bash
 pip install -e .
 ```
 
 Or if developing with dev extras:
+
 ```bash
 pip install -e ".[dev]"
 ```

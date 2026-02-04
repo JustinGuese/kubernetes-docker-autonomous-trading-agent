@@ -2,15 +2,16 @@ version: "3.8"
 
 services:
   # ── headless Chrome sidecar ───────────────────────────────────
+  # browserless: CDP-first server, no Selenium session lifecycle.
+  # Chrome stays alive until the container is stopped.
+  # Host port 9222 maps to browserless default 3000 so .env needs no change.
   chrome:
-    image: selenium/standalone-chrome:latest
+    image: browserless/browserless
     shm_size: "2gb"           # Chrome needs shared memory
-    environment:
-      - SE_OPTS=--log-level=WARNING
     ports:
-      - "9222:9222"           # expose CDP port to host for debugging
+      - "9222:3000"           # expose CDP port to host for debugging
     healthcheck:
-      test: ["CMD-SHELL", "curl -s http://localhost:9222/json | head -c 1"]
+      test: ["CMD-SHELL", "curl -s http://localhost:3000/ | head -c 1"]
       interval: 5s
       timeout: 3s
       retries: 3
@@ -21,7 +22,7 @@ services:
     env_file:
       - .env
     environment:
-      - BROWSER_CDP_URL=http://chrome:9222
+      - BROWSER_CDP_URL=http://chrome:3000
     depends_on:
       chrome:
         condition: service_healthy
