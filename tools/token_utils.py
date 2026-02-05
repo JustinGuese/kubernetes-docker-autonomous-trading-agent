@@ -5,10 +5,10 @@ token_utils.py - Utilities for handling token mints on Solana devnet.
 from solders.pubkey import Pubkey
 
 # Common token mint addresses on Solana devnet
-# Note: These are examples; update with actual devnet addresses if needed
+# Updated with more accurate devnet addresses
 DEVNET_MINTS = {
     'SOL': Pubkey.from_string('So11111111111111111111111111111111111111112'),  # Wrapped SOL
-    'USDC': Pubkey.from_string('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'),  # Mainnet USDC, may not work on devnet
+    'USDC': Pubkey.from_string('4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU'),  # Devnet USDC (example, verify)
     'WSOL': Pubkey.from_string('So11111111111111111111111111111111111111112'),
     # Add more tokens as needed
 }
@@ -28,6 +28,12 @@ def validate_mint(address: str) -> bool:
         return True
     except:
         return False
+
+# New function to add or update mint addresses dynamically
+def add_mint_address(symbol: str, address: str):
+    """Add or update a mint address in DEVNET_MINTS."""
+    symbol_upper = symbol.upper()
+    DEVNET_MINTS[symbol_upper] = Pubkey.from_string(address)
 
 if __name__ == "__main__":
     # Test the functions
