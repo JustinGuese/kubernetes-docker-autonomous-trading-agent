@@ -1,7 +1,7 @@
 ---
 # browserless: CDP-first Chrome server, no browserless session lifecycle.
 # The trader-bot CronJob connects to it via BROWSER_CDP_URL.
-# Service port 9222 maps to browserless container port 3000.
+# Service port 3000 exposes browserless' CDP endpoint.
 apiVersion: v1
 kind: Service
 metadata:

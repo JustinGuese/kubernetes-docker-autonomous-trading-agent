@@ -23,7 +23,7 @@ spec:
                 name: trader-bot-env
             env:
             - name: BROWSER_CDP_URL
-              value: "http://browserless-chrome:9222"
+              value: "http://browserless-chrome:3000"
             resources:
               limits:
                 cpu: "1"
