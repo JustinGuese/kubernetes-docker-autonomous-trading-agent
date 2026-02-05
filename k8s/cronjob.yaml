@@ -23,7 +23,7 @@ spec:
                 name: trader-bot-env
             env:
             - name: BROWSER_CDP_URL
-              value: "http://selenium-chrome.autonomoustrading:9222"
+              value: "http://browserless-chrome:9222"
             resources:
               limits:
                 cpu: "1"
@@ -32,11 +32,23 @@ spec:
                 cpu: 25m
                 memory: 25Mi
             volumeMounts:
-            # agent memory — PVC with subPath for single-file mount
+            # agent memory — PVC mounted as directory, file managed by app
             - name: memory-pvc
-              mountPath: /app/agent_memory.json
-              subPath: agent_memory.json
+              mountPath: /app/memory
           volumes:
           - name: memory-pvc
             persistentVolumeClaim:
               claimName: trader-bot-memory
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: trader-bot-memory
+  namespace: autonomoustrading
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 200Mi

@@ -12,7 +12,10 @@ from typing import Any
 
 from core.config import MemoryConfig
 
-MEMORY_PATH = Path("agent_memory.json")
+# Default location for on-disk JSON state.
+# In containerized deployments we mount a PVC at /app/memory so this resolves
+# to /app/memory/agent_memory.json instead of a bare file in the working dir.
+MEMORY_PATH = Path("memory/agent_memory.json")
 
 _DEFAULT_STATE: dict[str, Any] = {
     "daily_spend_sol": 0.0,

@@ -97,9 +97,9 @@ def build_graph(
         temperature=0.3,
         max_tokens=2048,  # type: ignore[arg-type]
         default_headers={
-        "HTTP-Referer": "aiAutonomousTraderBot",  # Optional. Site URL for rankings on openrouter.ai
-        "X-Title": "aiAutonomousTraderBot",  # Optional. Site title for rankings on openrouter.ai.
-    }
+            "HTTP-Referer": "https://github.com/JustinGuese/kubernetes-docker-autonomous-trading-agent",
+            "X-Title": "aiAutonomousTraderBot",  # Optional. Site title for rankings on openrouter.ai.
+        }
     )
 
     browser_tool = BrowserTool()

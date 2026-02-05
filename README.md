@@ -128,7 +128,9 @@ The container has read-only mounts on `core/` and `policies/` (defense in depth)
 
 ```bash
 kubectl create namespace autonomoustrading
-kubectl create secret generic trader-bot-env --from-file=.env -n autonomoustrading
+kubectl create secret generic trader-bot-env \
+  --from-env-file=.env \
+  -n autonomoustrading
 kubectl apply -f k8s/
 ```
 
