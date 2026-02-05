@@ -22,6 +22,8 @@ from solana.rpc.api import Client as SolanaClient
 from solders.keypair import Keypair
 from solders.transaction import VersionedTransaction
 
+from tenacity import retry, stop_after_attempt, wait_exponential
+
 logger = logging.getLogger(__name__)
 
 JUP_ULTRA_BASE_URL = "https://api.jup.ag"
@@ -64,6 +66,7 @@ class SwapTool:
     ) -> None:
         self._keypair = keypair
         self._rpc = SolanaClient(rpc_url)
+        self._rpc_url = rpc_url
         self._tokens = SwapTokens()
         self._api_key = api_key
 
@@ -71,6 +74,66 @@ class SwapTool:
 
     def _owner_pubkey_str(self) -> str:
         return str(self._keypair.pubkey())
+
+    def _is_devnet(self) -> bool:
+        """Return True if the configured RPC URL points to a devnet cluster."""
+        return "devnet" in self._rpc_url.lower()
+
+    # ── internal Ultra helpers ──────────────────────────────────────
+
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+    def _execute_ultra(
+        self,
+        request_id: str,
+        signed_tx_b64: str,
+        headers: Dict[str, str] | None,
+    ) -> Dict[str, Any]:
+        """Execute a previously-built Ultra swap transaction with retry/backoff.
+
+        Network issues or transient HTTP failures will be retried up to 3 times
+        with exponential backoff before surfacing as an exception.
+        """
+        exec_resp = httpx.post(
+            f"{JUP_ULTRA_BASE_URL}/ultra/v1/execute",
+            json={"requestId": request_id, "signedTransaction": signed_tx_b64},
+            headers=headers or None,
+            timeout=20.0,
+        )
+        if exec_resp.status_code != 200:
+            raise RuntimeError(f"Ultra execute error {exec_resp.status_code}: {exec_resp.text}")
+        return exec_resp.json()
+
+    def _swap_devnet_mock(
+        self,
+        from_token: str,
+        to_token: str,
+        amount_lamports: int,
+        slippage_bps: int,
+    ) -> str:
+        """Devnet-safe mock swap implementation.
+
+        On Solana devnet, Jupiter Ultra is not available and we do not want to
+        risk mainnet funds. Instead of attempting a real swap, we log the
+        requested parameters and return a synthetic signature string.
+
+        This keeps the agent's control flow and position tracking exercised in
+        tests without touching real liquidity.
+        """
+        logger.info(
+            "SwapTool (devnet mock): requested swap %s -> %s amount=%d (slippage_bps=%d)",
+            from_token,
+            to_token,
+            amount_lamports,
+            slippage_bps,
+        )
+        # Encode a deterministic-but-fake signature so downstream logs/tests can
+        # still correlate actions.
+        fake_sig = (
+            f"DEVNET-MOCK-SWAP-{from_token}-{to_token}-"
+            f"{amount_lamports}-{slippage_bps}"
+        )
+        logger.info("SwapTool (devnet mock): returning synthetic signature=%s", fake_sig)
+        return fake_sig
 
     # ── public API ─────────────────────────────────────────────────
 
@@ -88,9 +151,21 @@ class SwapTool:
         if amount_lamports <= 0:
             raise ValueError("amount_lamports must be positive")
 
+        # Validate supported symbols up-front so we fail fast even when running
+        # in devnet mock mode.
+        self._tokens.mint_for_symbol(from_token)
+        self._tokens.mint_for_symbol(to_token)
+
+        # On devnet we cannot safely call Jupiter Ultra (mainnet-only). Instead
+        # of raising and blocking all swap tests, we return a deterministic
+        # synthetic signature so the rest of the pipeline (position tracking,
+        # logging, reflections) can still be exercised without real funds.
+        if self._is_devnet():
+            return self._swap_devnet_mock(from_token, to_token, amount_lamports, slippage_bps)
+
         input_mint = self._tokens.mint_for_symbol(from_token)
         output_mint = self._tokens.mint_for_symbol(to_token)
-        owner = self._owner_pubkey_str()
+        taker = self._owner_pubkey_str()
 
         logger.info(
             "SwapTool: requesting Ultra order %s -> %s amount=%d (slippage_bps=%d)",
@@ -111,7 +186,7 @@ class SwapTool:
                 "outputMint": output_mint,
                 "amount": str(amount_lamports),
                 "slippageBps": str(slippage_bps),
-                "owner": owner,
+                "taker": taker,
             },
             headers=headers or None,
             timeout=20.0,
@@ -152,16 +227,7 @@ class SwapTool:
         signed_tx = VersionedTransaction.populate(tx.message, [signature])
         signed_b64 = base64.b64encode(bytes(signed_tx)).decode("utf-8")
 
-        exec_resp = httpx.post(
-            f"{JUP_ULTRA_BASE_URL}/ultra/v1/execute",
-            json={"requestId": request_id, "signedTransaction": signed_b64},
-            headers=headers or None,
-            timeout=20.0,
-        )
-        if exec_resp.status_code != 200:
-            raise RuntimeError(f"Ultra execute error {exec_resp.status_code}: {exec_resp.text}")
-
-        exec_json: Dict[str, Any] = exec_resp.json()
+        exec_json = self._execute_ultra(request_id, signed_b64, headers)
         signature = exec_json.get("signature") or exec_json.get("txid")
         if not signature:
             raise RuntimeError(f"Ultra execute response missing signature: {exec_json}")

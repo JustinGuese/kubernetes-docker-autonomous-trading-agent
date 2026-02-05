@@ -67,3 +67,13 @@ class TestSummarize:
         empty = pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
         summary = TATool.summarize(empty, symbol="SOLUSDT")
         assert "no data" in summary
+
+
+class TestCorrelationHelpers:
+    def test_btc_dominance_insufficient_data(self) -> None:
+        msg = TATool.compute_btc_dominance(pd.DataFrame(), {})
+        assert "BTC dominance: insufficient data" in msg
+
+    def test_summarize_correlations_insufficient_data(self) -> None:
+        msg = TATool.summarize_correlations({})
+        assert "SOL/BTC: insufficient data" in msg

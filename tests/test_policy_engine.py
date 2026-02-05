@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from core.config import AppConfig, GitConfig, LLMConfig, PolicyConfig, SolanaConfig
+from core.config import AppConfig, GitConfig, LLMConfig, MemoryConfig, PolicyConfig, SolanaConfig
 from core.memory import MemoryStore
 from core.policy_engine import PolicyEngine, PolicyViolation
 
@@ -28,6 +28,7 @@ def _make_config(
             max_loc_delta=max_loc_delta,
         ),
         git=GitConfig(token="ghp_fake", repo="owner/repo"),
+        memory=MemoryConfig(),
     )
 
 

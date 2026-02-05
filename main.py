@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import logging
 import sys
 
@@ -20,8 +21,19 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def main() -> None:
-    logger.info("starting up")
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Autonomous trading agent runner")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="plan actions but do not execute wallet_send or swap on-chain",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> None:
+    args = parse_args(argv)
+    logger.info("starting up (dry_run=%s)", args.dry_run)
     try:
         config = load_config()
     except EnvironmentError as exc:
@@ -30,10 +42,10 @@ def main() -> None:
 
     logger.info("config loaded — model=%s rpc=%s", config.llm.heavy_model, config.solana.rpc_url)
 
-    memory = MemoryStore()
+    memory = MemoryStore(config=config.memory)
     policy = PolicyEngine(config, memory)
 
-    graph = build_graph(config, memory, policy)
+    graph = build_graph(config, memory, policy, dry_run=args.dry_run)
     logger.info("graph built — invoking")
     result = graph.invoke(_initial_state())
 

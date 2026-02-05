@@ -8,7 +8,7 @@ from solders.pubkey import Pubkey
 # Updated with more accurate devnet addresses
 DEVNET_MINTS = {
     'SOL': Pubkey.from_string('So11111111111111111111111111111111111111112'),  # Wrapped SOL
-    'USDC': Pubkey.from_string('4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU'),  # Devnet USDC (example, verify)
+    'USDC': Pubkey.from_string('4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU'),  # Devnet USDC ?
     'WSOL': Pubkey.from_string('So11111111111111111111111111111111111111112'),
     # Add more tokens as needed
 }
@@ -26,7 +26,7 @@ def validate_mint(address: str) -> bool:
     try:
         Pubkey.from_string(address)
         return True
-    except:
+    except Exception:
         return False
 
 # New function to add or update mint addresses dynamically

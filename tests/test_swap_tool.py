@@ -34,9 +34,11 @@ class TestSwapTool:
         mock_get,
         mock_post,
     ) -> None:
-        # Fake keypair (random; not used against real cluster)
+        # Fake keypair (random; not used against real cluster). Use a mainnet
+        # RPC URL here so SwapTool exercises the full Ultra code path rather
+        # than the devnet mock shortcut.
         keypair = Keypair()
-        tool = SwapTool(keypair, "https://api.devnet.solana.com")
+        tool = SwapTool(keypair, "https://api.mainnet-beta.solana.com")
 
         # Mock Ultra /order response
         import base64
@@ -67,7 +69,7 @@ class TestSwapTool:
     @patch("tools.swap_tool.httpx.get")
     def test_swap_order_api_error_raises(self, mock_get: object) -> None:
         keypair = Keypair()
-        tool = SwapTool(keypair, "https://api.devnet.solana.com")
+        tool = SwapTool(keypair, "https://api.mainnet-beta.solana.com")
         mock_get.return_value.status_code = 500
         mock_get.return_value.text = "Internal Server Error"
         with pytest.raises(RuntimeError, match="Ultra order error 500"):
@@ -76,7 +78,7 @@ class TestSwapTool:
     @patch("tools.swap_tool.httpx.get")
     def test_swap_order_missing_swap_transaction_raises(self, mock_get: object) -> None:
         keypair = Keypair()
-        tool = SwapTool(keypair, "https://api.devnet.solana.com")
+        tool = SwapTool(keypair, "https://api.mainnet-beta.solana.com")
         mock_get.return_value.status_code = 200
         mock_get.return_value.json.return_value = {"requestId": "req-1"}
         with pytest.raises(RuntimeError, match="no transaction"):
@@ -84,7 +86,7 @@ class TestSwapTool:
 
     def test_swap_invalid_symbol_raises(self) -> None:
         keypair = Keypair()
-        tool = SwapTool(keypair, "https://api.devnet.solana.com")
+        tool = SwapTool(keypair, "https://api.mainnet-beta.solana.com")
         with pytest.raises(ValueError, match="Unsupported token symbol"):
             tool.swap("INVALID", "USDC", amount_lamports=1_000_000_000)
 

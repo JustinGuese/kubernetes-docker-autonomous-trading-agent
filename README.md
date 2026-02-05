@@ -32,6 +32,7 @@ Edit `.env` and provide:
 Optional (defaults shown):
 
 - `SOLANA_RPC_URL` — defaults to `https://api.devnet.solana.com`
+- `SOLANA_WHALE_WALLETS` — optional comma-separated list of whale wallets for on-chain monitoring
 - `CONFIDENCE_THRESHOLD` — defaults to `0.6` (min LLM confidence to execute)
 - `MAX_SOL_PER_TX` — defaults to `0.1` SOL per transaction
 - `DAILY_SPEND_CAP_SOL` — defaults to `0.5` SOL per day
@@ -98,7 +99,8 @@ python3 checkbalance.py
 ### Local (development)
 
 ```bash
-python main.py
+python main.py           # live mode
+python main.py --dry-run # plan actions but do not touch on-chain state
 ```
 
 The agent will:
@@ -157,7 +159,8 @@ persist memory + exit
 | `core/policy_engine.py`        | Gate every action: wallet sends, git commits           |
 | `core/sandbox.py`              | Self-mod pipeline: write → pytest → ruff → git push    |
 | `core/agent.py`                | LangGraph state machine                                |
-| `tools/wallet_tool.py`         | Solana devnet balance, send, history                   |
+| `tools/wallet_tool.py`         | Solana devnet balance, send, history, and SPL token balances (with devnet-safe RPC error handling) |
+| `tools/position_tool.py`       | Track token positions and swap history; can sync from on-chain balances and power portfolio summaries |
 | `tools/browser_tool.py`        | Playwright scraper (no domain restrictions)            |
 | `tools/git_tool.py`            | Subprocess git; ephemeral token injection              |
 | `tools/fs_tool.py`             | File read/list; path-traversal defense                 |
@@ -172,12 +175,19 @@ persist memory + exit
 5. **Domain allowlist** — hardcoded in config (not env-driven)
 6. **Confidence gating** — LLM actions require `confidence >= 0.6` (configurable)
 
+### Portfolio tracking and swaps
+
+- The agent tracks per-token positions (amount and rough USD cost basis) via an internal `PositionTool`.
+- On startup it can initialize missing positions from on-chain wallet balances (e.g. SOL, USDC, WBTC on devnet), so tracked positions reflect reality.
+- Real swaps (on non-mock networks) update these positions and append entries to `swap_history` with from/to token, notional USD, slippage, and signature.
+- This portfolio view is used to summarise holdings for the LLM and to detect/reconcile drift between on-chain SOL and the tracked SOL position.
+
 ### What the Agent Can Do
 
 - **`wallet_send`** — send SOL to an address (gated by policy)
 - **`scrape`** — fetch any URL (no restrictions; text truncated to 8k chars)
 - **`extend_code`** — write new tool code (rolled back if tests fail)
-- **`swap`** — exchange Solana tokens via Jupiter DEX (e.g., SOL↔USDC); swaps are risk-gated by per-trade and daily USD caps and tracked in the agent's portfolio state
+- **`swap`** — exchange Solana tokens via Jupiter DEX (e.g., SOL↔USDC). Swaps are risk-gated in USD terms by per-trade and daily caps and guarded by a pre-swap balance check (`wallet_tool.balance_token`) so the agent never tries to swap more than it holds. On devnet, swaps run in mock mode (synthetic `DEVNET-MOCK-SWAP-…` signatures): positions are not mutated, but a swap history entry is recorded with `mock: true`. On mainnet or other real networks, swaps would update tracked positions based on the notional amount and prices.
 - **`noop`** — do nothing (safest choice when uncertain)
 
 All actions persisted to memory with reflections; agent learns from history across runs.
@@ -239,7 +249,7 @@ kubectl logs -f deployment/aiautonomoustraderbot
 pytest tests/ -v
 ```
 
-40 tests covering policies, wallet, browser, sandbox, and git operations.
+Tests cover policies, wallet, browser, sandbox, TA, swap, on-chain helpers, and more.
 
 ### Lint
 

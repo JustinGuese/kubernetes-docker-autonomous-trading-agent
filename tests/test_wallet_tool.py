@@ -1,5 +1,3 @@
-"""Tests for tools/wallet_tool.py with mocked Solana RPC client."""
-
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
@@ -9,7 +7,7 @@ import pytest
 from solders.hash import Hash
 from solders.keypair import Keypair
 
-from tools.wallet_tool import WalletTool
+from tools.wallet_tool import KNOWN_MINTS, WalletTool
 
 # ── fixtures ──────────────────────────────────────────────────────────────────
 
@@ -43,6 +41,61 @@ class TestWalletBalance:
         tool, client = mock_wallet
         client.get_balance.return_value = MagicMock(value=0)
         assert tool.balance_sol() == 0.0
+
+
+class TestWalletTokenBalances:
+    def test_balance_token_sol_uses_balance_sol(self, mock_wallet) -> None:
+        tool, client = mock_wallet
+        client.get_balance.return_value = MagicMock(value=1_500_000_000)
+        assert abs(tool.balance_token("SOL") - 1.5) < 1e-9
+
+    def test_get_all_balances_calls_balance_token(self, mock_wallet) -> None:
+        # Use a real WalletTool instance but stub out balance_token so we don't
+        # depend on real RPC layout.
+        tool, _ = mock_wallet
+        calls: list[str] = []
+
+        def _fake_balance(sym: str) -> float:
+            calls.append(sym)
+            return {"SOL": 1.0, "USDC": 2.0, "WBTC": 0.0}.get(sym, 0.0)
+
+        tool.balance_token = _fake_balance  # type: ignore[assignment]
+        balances = tool.get_all_balances()
+
+        # Should query every known mint exactly once.
+        assert set(calls) == set(KNOWN_MINTS.keys())
+        assert balances["SOL"] == 1.0
+        assert balances["USDC"] == 2.0
+
+    @patch("tools.wallet_tool.Client")
+    def test_balance_token_usdc_uses_pubkey_mint(self, mock_client_cls: MagicMock) -> None:
+        """Smoke-test SPL branch to ensure it doesn't raise when mint is a string."""
+        # Reuse the existing valid-key fixture behaviour by constructing a
+        # WalletTool via the patched Client but with a real Keypair, similar to
+        # mock_wallet. We don't care about the actual client methods here.
+        from solders.keypair import Keypair
+
+        kp = Keypair()
+        valid_key_b58 = base58.b58encode(bytes(kp)).decode()
+        mock_client = mock_client_cls.return_value
+        # Simulate no token accounts so the SPL branch runs but returns 0.0
+        mock_client.get_token_accounts_by_owner.return_value = MagicMock(value=[])
+        tool = WalletTool(valid_key_b58, "https://api.devnet.solana.com")
+        assert tool.balance_token("USDC") == 0.0
+
+    @patch("tools.wallet_tool.Client")
+    def test_balance_token_rpc_error_returns_zero(self, mock_client_cls: MagicMock) -> None:
+        """If the RPC rejects the mint (e.g. on devnet), treat as zero balance."""
+        from solders.keypair import Keypair
+
+        kp = Keypair()
+        valid_key_b58 = base58.b58encode(bytes(kp)).decode()
+        mock_client = mock_client_cls.return_value
+        mock_client.get_token_accounts_by_owner.side_effect = RuntimeError(
+            "Invalid param: Token mint could not be unpacked"
+        )
+        tool = WalletTool(valid_key_b58, "https://api.devnet.solana.com")
+        assert tool.balance_token("USDC") == 0.0
 
 
 class TestWalletSend:

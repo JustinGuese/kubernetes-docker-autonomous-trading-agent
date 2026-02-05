@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from core.config import AppConfig, GitConfig, LLMConfig, PolicyConfig, SolanaConfig
+from core.config import AppConfig, GitConfig, LLMConfig, MemoryConfig, PolicyConfig, SolanaConfig
 from core.memory import MemoryStore
 from core.policy_engine import PolicyEngine, PolicyViolation
 from core.sandbox import Sandbox, SandboxError
@@ -19,6 +19,7 @@ def _make_config(max_loc_delta: int = 200) -> AppConfig:
         solana=SolanaConfig(private_key="k", rpc_url="https://x"),
         policy=PolicyConfig(max_loc_delta=max_loc_delta),
         git=GitConfig(token="t", repo="o/r"),
+        memory=MemoryConfig(),
     )
 
 

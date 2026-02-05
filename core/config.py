@@ -35,6 +35,8 @@ class SolanaConfig:
     private_key: str  # base58-encoded 64-byte keypair
     rpc_url: str = "https://api.devnet.solana.com"
     jupiter_api_key: str | None = None  # Required for Jupiter Ultra swap API (get at portal.jup.ag)
+    # Optional list of whale wallets for on-chain/whale tools; comma-separated.
+    whale_wallets: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -50,6 +52,16 @@ class PolicyConfig:
 
 
 @dataclass(frozen=True)
+class MemoryConfig:
+    """In-memory and on-disk limits for the JSON state store."""
+
+    max_reflections: int = 50        # Keep last N reflections
+    max_trades: int = 100            # Keep last N trades
+    max_swap_history: int = 50       # Keep last N swap records
+    compress_observations: bool = True  # Store compact price lines instead of full scrape blob
+
+
+@dataclass(frozen=True)
 class GitConfig:
     token: str
     repo: str  # owner/repo
@@ -62,6 +74,7 @@ class AppConfig:
     solana: SolanaConfig
     policy: PolicyConfig
     git: GitConfig
+    memory: MemoryConfig
     allowed_domains: frozenset[str] = ALLOWED_SCRAPE_DOMAINS
 
 
@@ -96,6 +109,7 @@ def load_config() -> AppConfig:
             daily_spend_cap_sol=float(_getenv("DAILY_SPEND_CAP_SOL", "0.5")),  # type: ignore[arg-type]
             max_loc_delta=int(_getenv("MAX_LOC_DELTA", "200")),  # type: ignore[arg-type]
         ),
+        memory=MemoryConfig(),
         git=GitConfig(
             token=_require("GITHUB_TOKEN"),
             repo=_require("GITHUB_REPO"),

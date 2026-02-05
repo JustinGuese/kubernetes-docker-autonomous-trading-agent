@@ -65,6 +65,21 @@ class PolicyEngine:
                 f"Projected daily swap volume {projected} exceeds cap {cfg.daily_swap_cap_usd}"
             )
 
+    def check_swap_balance(self, wallet_tool, from_token: str, amount: float) -> None:
+        """Optional policy-level pre-swap balance check.
+
+        Callers may use this instead of or in addition to direct wallet-level
+        balance checks to ensure insufficient balance errors surface as
+        PolicyViolation.
+        """
+        if amount <= 0:
+            raise PolicyViolation("swap amount must be positive")
+        available = wallet_tool.balance_token(from_token)
+        if available < amount:
+            raise PolicyViolation(
+                f"Insufficient {from_token} balance for swap: have {available}, need {amount}"
+            )
+
     # ── browser ───────────────────────────────────────────────────
 
     def check_browser_url(self, url: str) -> None:

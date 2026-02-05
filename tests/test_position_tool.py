@@ -1,5 +1,3 @@
-"""Tests for tools/position_tool.py."""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -7,6 +5,14 @@ from typing import Any
 
 from core.memory import MemoryStore
 from tools.position_tool import PositionTool
+
+
+class DummyWalletTool:
+    def __init__(self, balances: dict[str, float]) -> None:
+        self._balances = balances
+
+    def get_all_balances(self) -> dict[str, float]:
+        return dict(self._balances)
 
 
 def _default_state() -> dict[str, Any]:
@@ -34,6 +40,35 @@ class _InMemoryStore:
 
     def save(self, state: dict[str, Any]) -> None:
         self._state = dict(state)
+
+
+class TestPositionSyncFromOnchain:
+    def test_sync_initializes_missing_positions(self, tmp_path: Path) -> None:
+        memory = MemoryStore(path=tmp_path / "memory.json")
+        tool = PositionTool(memory)
+        wallet = DummyWalletTool({"SOL": 0.5, "USDC": 100.0})
+
+        tool.sync_from_onchain(wallet, {"SOL": 20.0, "USDC": 1.0})
+
+        sol_pos = tool.get_position("SOL")
+        usdc_pos = tool.get_position("USDC")
+
+        assert sol_pos["amount"] == 0.5
+        assert usdc_pos["amount"] == 100.0
+        assert usdc_pos.get("source") == "onchain_sync"
+
+    def test_sync_does_not_overwrite_existing_nonzero_positions(self, tmp_path: Path) -> None:
+        memory = MemoryStore(path=tmp_path / "memory.json")
+        tool = PositionTool(memory)
+        # Seed an existing SOL position
+        tool.update_position("SOL", 0.2, 5.0)
+
+        wallet = DummyWalletTool({"SOL": 0.5})
+        tool.sync_from_onchain(wallet, {"SOL": 20.0})
+
+        sol_pos = tool.get_position("SOL")
+        # Existing amount should be preserved
+        assert sol_pos["amount"] == 0.2
 
 
 def test_update_and_value(tmp_path: Path) -> None:

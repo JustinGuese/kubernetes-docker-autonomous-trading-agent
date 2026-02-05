@@ -10,6 +10,8 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+from core.config import MemoryConfig
+
 MEMORY_PATH = Path("agent_memory.json")
 
 _DEFAULT_STATE: dict[str, Any] = {
@@ -19,6 +21,7 @@ _DEFAULT_STATE: dict[str, Any] = {
     "daily_swap_date": "",
     "reflections": [],
     "trades": [],             # structured action log — see append_trade()
+    "trade_summaries": [],    # statistical summaries of pruned trades
     # Portfolio-aware benchmark: compare total portfolio value vs a simple
     # SOL buy-and-hold from the same starting USD value. Fields populated lazily.
     "benchmark": {
@@ -29,6 +32,8 @@ _DEFAULT_STATE: dict[str, Any] = {
     # Token positions and swap history are populated lazily.
     "positions": {},
     "swap_history": [],
+    "last_observations": "",
+    "last_observations_prices": [],
 }
 
 # How many chars of action_result to persist per trade
@@ -38,8 +43,9 @@ _RESULT_TRUNCATE = 300
 class MemoryStore:
     """Thin wrapper around a JSON file.  All reads go to disk — no in-process cache."""
 
-    def __init__(self, path: Path = MEMORY_PATH):
+    def __init__(self, path: Path = MEMORY_PATH, config: MemoryConfig | None = None):
         self.path = path
+        self._config = config or MemoryConfig()
 
     # ── public API ────────────────────────────────────────────────
 
@@ -65,7 +71,8 @@ class MemoryStore:
         return state
 
     def save(self, state: dict[str, Any]) -> None:
-        """Atomic write: write to temp file then rename."""
+        """Apply rotation limits and atomically write to disk."""
+        state = self._summarize_and_rotate(state)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp = tempfile.mkstemp(dir=self.path.parent, suffix=".tmp")
         try:
@@ -75,6 +82,65 @@ class MemoryStore:
         except Exception:
             os.unlink(tmp)
             raise
+
+    # ── rotation / summarisation ─────────────────────────────────────
+
+    def _summarize_and_rotate(self, state: dict[str, Any]) -> dict[str, Any]:
+        """Generate summary stats from pruned entries, then trim arrays."""
+        limits = {
+            "reflections": self._config.max_reflections,
+            "trades": self._config.max_trades,
+            "swap_history": self._config.max_swap_history,
+        }
+
+        for key, limit in limits.items():
+            arr = state.get(key, [])
+            if not isinstance(arr, list) or limit <= 0:
+                continue
+            if len(arr) > limit:
+                pruned = arr[:-limit]  # Entries being removed
+                kept = arr[-limit:]    # Entries to keep
+
+                # Generate summary of pruned trade entries
+                if key == "trades" and pruned:
+                    summary = self._summarize_trades(pruned)
+                    summaries = state.setdefault("trade_summaries", [])
+                    if isinstance(summaries, list):
+                        summaries.append(summary)
+                    else:
+                        state["trade_summaries"] = [summary]
+
+                state[key] = kept
+        return state
+
+    def _summarize_trades(self, trades: list[dict[str, Any]]) -> dict[str, Any]:
+        """Generate statistical summary of trades being pruned."""
+        action_counts: dict[str, int] = {}
+        successes = 0
+        failures = 0
+
+        for t in trades:
+            action = str(t.get("action_type", "unknown"))
+            action_counts[action] = action_counts.get(action, 0) + 1
+            result = str(t.get("result", ""))
+            if "failed" in result.lower() or "blocked" in result.lower():
+                failures += 1
+            else:
+                successes += 1
+
+        period = "unknown"
+        if trades:
+            first = trades[0]
+            last = trades[-1]
+            period = f"{first.get('date', '?')} to {last.get('date', '?')}"
+
+        total = len(trades)
+        return {
+            "period": period,
+            "total": total,
+            "actions": action_counts,
+            "success_rate": successes / total if total else 0.0,
+        }
 
     # ── benchmark helpers ──────────────────────────────────────────
 
@@ -127,11 +193,20 @@ class MemoryStore:
     def append_trade(self, plan: dict[str, Any], result: str) -> None:
         """Persist a full action record derived from the executed plan + outcome."""
         state = self.load()
+        params = plan.get("params", {}) or {}
+        # For extend_code, don't store full code - just metadata
+        if plan.get("action_type") == "extend_code":
+            code_str = str(params.get("code", ""))
+            params = {
+                "commit_message": params.get("commit_message", ""),
+                "code_lines": len(code_str.splitlines()) if code_str else 0,
+            }
+
         state.setdefault("trades", []).append({
             "date": date.today().isoformat(),
             "action_type": plan.get("action_type", "unknown"),
             "target": plan.get("target", ""),
-            "params": plan.get("params", {}),
+            "params": params,
             "confidence": plan.get("confidence", 0.0),
             "reason": plan.get("reason", ""),
             "result": result[:_RESULT_TRUNCATE],
@@ -143,3 +218,31 @@ class MemoryStore:
         state = self.load()
         trades = state.get("trades", [])
         return list(reversed(trades[-n:]))
+
+    # ── observation compression ─────────────────────────────────────
+
+    def set_observations_compressed(self, observations: str) -> None:
+        """Store only price lines from observations, not full scrape."""
+        if not self._config.compress_observations:
+            state = self.load()
+            state["last_observations"] = observations
+            self.save(state)
+            return
+
+        prices: list[str] = []
+        for line in str(observations).splitlines():
+            # Extract compact close values from TA summaries like:
+            # [SOLUSDT] close=90.19, [BTCUSDT] close=70283.23
+            if "] close=" in line:
+                symbol_part = line.split("]", 1)[0] + "]"
+                try:
+                    price_part = line.split("close=")[1].split()[0]
+                except Exception:
+                    continue
+                prices.append(f"{symbol_part} {price_part}")
+
+        state = self.load()
+        state["last_observations_prices"] = prices
+        # Optionally keep a short stub instead of the full blob.
+        state["last_observations"] = ""
+        self.save(state)
