@@ -183,9 +183,23 @@ class JupiterUltraSwap(SwapStrategy):
 
         unsigned_bytes = base64.b64decode(unsigned_tx_b64)
         tx = VersionedTransaction.from_bytes(unsigned_bytes)
-        signature = self._keypair.sign_message(bytes(tx.message))
-        signed_tx = VersionedTransaction.populate(tx.message, [signature])
+        signed_tx = VersionedTransaction(tx.message, [self._keypair])
         signed_b64 = base64.b64encode(bytes(signed_tx)).decode("utf-8")
+
+        # Swap-specific debug log so we can inspect Ultra failures post-run.
+        _debug_log(
+            "H1",
+            "tools/swap_tool.py:JupiterUltraSwap.execute_swap:before_execute",
+            "prepared signed transaction for Ultra execute",
+            {
+                "owner_pubkey": self._owner_pubkey_str(),
+                "request_id": request_id,
+                "unsigned_tx_len": len(unsigned_bytes),
+                "signed_tx_len": len(bytes(signed_tx)),
+                "signed_b64_prefix": signed_b64[:64],
+                "api_key_present": bool(self._api_key),
+            },
+        )
 
         exec_json = self._execute_ultra(request_id, signed_b64, headers)
         signature = exec_json.get("signature") or exec_json.get("txid")
@@ -298,8 +312,7 @@ class JupiterV6Swap(SwapStrategy):
 
         unsigned_bytes = base64.b64decode(unsigned_tx_b64)
         tx = VersionedTransaction.from_bytes(unsigned_bytes)
-        signature = self._keypair.sign_message(bytes(tx.message))
-        signed_tx = VersionedTransaction.populate(tx.message, [signature])
+        signed_tx = VersionedTransaction(tx.message, [self._keypair])
 
         # Submit directly to the configured RPC rather than via Jupiter execute.
         resp = self._rpc.send_raw_transaction(bytes(signed_tx))

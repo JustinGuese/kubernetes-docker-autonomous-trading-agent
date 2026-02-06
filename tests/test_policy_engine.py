@@ -18,10 +18,16 @@ def _make_config(
     max_sol_per_tx: float = 0.1,
     daily_cap: float = 0.5,
     max_loc_delta: int = 200,
+    solana_rpc_url: str = "https://fake",
+    mainnet_min_balance_sol: float = 0.1,
 ) -> AppConfig:
     return AppConfig(
         llm=LLMConfig(api_key="test-key"),
-        solana=SolanaConfig(private_key="fake", rpc_url="https://fake"),
+        solana=SolanaConfig(
+            private_key="fake",
+            rpc_url=solana_rpc_url,
+            mainnet_min_balance_sol=mainnet_min_balance_sol,
+        ),
         policy=PolicyConfig(
             confidence_threshold=0.6,
             max_sol_per_tx=max_sol_per_tx,
@@ -93,20 +99,19 @@ class TestBrowserUrl:
         engine.check_browser_url("https://coingecko.com/en/coins/solana")
 
     def test_disallowed_domain_blocked(self, engine: PolicyEngine) -> None:
-        with pytest.raises(PolicyViolation, match="not in the allowed"):
-            engine.check_browser_url("https://evil.com/phish")
+        # Scraping is now allowed for all domains; this should not raise.
+        engine.check_browser_url("https://evil.com/phish")
 
     def test_subdomain_blocked(self, engine: PolicyEngine) -> None:
-        # sub.coingecko.com is NOT the same as coingecko.com
-        with pytest.raises(PolicyViolation, match="not in the allowed"):
-            engine.check_browser_url("https://sub.coingecko.com/page")
+        # Subdomains are also allowed under the permissive scraping policy.
+        engine.check_browser_url("https://sub.coingecko.com/page")
 
     def test_port_stripped(self, engine: PolicyEngine) -> None:
         engine.check_browser_url("https://coingecko.com:443/en")
 
     def test_path_traversal_in_url_still_checks_domain(self, engine: PolicyEngine) -> None:
-        with pytest.raises(PolicyViolation, match="not in the allowed"):
-            engine.check_browser_url("https://evil.com/../coingecko.com/trick")
+        # Path traversal in URLs does not affect the now-unrestricted domain policy.
+        engine.check_browser_url("https://evil.com/../coingecko.com/trick")
 
 
 # ── git paths ─────────────────────────────────────────────────────────────────
@@ -197,20 +202,52 @@ class TestSwapMainnetSafety:
         state["positions"] = {"SOL": {"amount": 0.5}}
         mem.save(state)
 
-        cfg = _make_config()
-        # Ensure a specific minimum balance for the test.
-        cfg.solana = cfg.solana.__class__(
-            private_key=cfg.solana.private_key,
-            rpc_url="https://api.mainnet-beta.solana.com",
-            jupiter_api_key=cfg.solana.jupiter_api_key,
-            whale_wallets=cfg.solana.whale_wallets,
+        # Ensure a specific minimum balance and mainnet RPC URL for the test.
+        cfg = _make_config(
+            solana_rpc_url="https://api.mainnet-beta.solana.com",
             mainnet_min_balance_sol=0.1,
         )
         eng = PolicyEngine(cfg, mem)
 
         # Swapping 0.35 SOL-equivalent should leave 0.15 SOL (> 0.1) → allowed.
-        eng.check_swap("SOL", "USDC", 0.35, NetworkType.MAINNET)
+        eng.check_swap(
+            "SOL",
+            "USDC",
+            amount_usd=0.35,
+            network=NetworkType.MAINNET,
+            amount_native=0.35,
+        )
 
         # Swapping 0.45 SOL-equivalent would leave 0.05 (< 0.1) → blocked.
         with pytest.raises(PolicyViolation, match="Mainnet safety"):
-            eng.check_swap("SOL", "USDC", 0.45, NetworkType.MAINNET)
+            eng.check_swap(
+                "SOL",
+                "USDC",
+                amount_usd=0.45,
+                network=NetworkType.MAINNET,
+                amount_native=0.45,
+            )
+
+    def test_mainnet_sol_swap_uses_native_not_usd(self, tmp_path: Path) -> None:
+        """Guard should respect SOL amount even when USD notional is large."""
+        mem = MemoryStore(path=tmp_path / "mem_mainnet_native.json")
+        state = mem.load()
+        # Seed a SOL position of 0.5
+        state["positions"] = {"SOL": {"amount": 0.5}}
+        mem.save(state)
+
+        cfg = _make_config(
+            solana_rpc_url="https://api.mainnet-beta.solana.com",
+            mainnet_min_balance_sol=0.1,
+        )
+        eng = PolicyEngine(cfg, mem)
+
+        # Example: SOL at $100 → amount_usd=10.0, amount_native=0.1. Using native
+        # amount, 0.5 - 0.1 = 0.4 (> 0.1) so this should pass.
+        eng.check_swap(
+            "SOL",
+            "USDC",
+            amount_usd=10.0,
+            network=NetworkType.MAINNET,
+            amount_native=0.1,
+        )

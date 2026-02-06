@@ -22,6 +22,7 @@ from core.policy_engine import PolicyEngine, PolicyViolation
 from core.sandbox import Sandbox
 from tools.binance_tool import BinanceTool
 from tools.browser_tool import BrowserTool
+from tools.coingecko_tool import CoingeckoTool
 from tools.funding_tool import FundingTool
 from tools.history_tool import HistoryTool
 from tools.onchain_tool import OnchainConfig, OnchainTool
@@ -89,8 +90,6 @@ def _initial_state() -> AgentState:
 
 _DEFAULT_SCRAPE_URLS = [
     "https://dexscreener.com",
-    "https://www.coingecko.com",
-    "https://www.coingecko.com/en/crypto-gainers-losers",
     "https://www.coinmarketcap.com",
 ]
 
@@ -158,6 +157,7 @@ def build_graph(
     whale_tool = WhaleTool(WhaleConfig(rpc_url=config.solana.rpc_url))
     onchain_tool = OnchainTool(OnchainConfig(rpc_url=config.solana.rpc_url))
     sentiment_tool = SentimentTool(SentimentConfig())
+    coingecko_tool = CoingeckoTool()
 
     def _summarize_token_balances() -> tuple[dict[str, float], str]:
         """Combine wallet and position data into a per-token balance summary."""
@@ -287,6 +287,14 @@ def build_graph(
             chunks.append(f"[sentiment] failed to summarize sentiment: {exc}")
             logger.warning("    → sentiment summary failed: %s", exc)
 
+        # 7. CoinGecko trending coins (API-based, replaces HTML scraping)
+        try:
+            trending = coingecko_tool.get_trending_summary()
+            chunks.append(trending)
+        except Exception as exc:
+            chunks.append(f"[coingecko_trending] failed to fetch via API: {exc}")
+            logger.warning("    → CoinGecko trending fetch failed: %s", exc)
+
         logger.info("  perceive complete — %d observation chunks", len(chunks))
         observations = "\n\n".join(chunks)
         # Reset per-run step counters at the start of each invocation.
@@ -348,6 +356,8 @@ def build_graph(
         "(positive = longs pay shorts).\n"
         "- A multi-timeframe trend alignment summary (1h vs 4h) per symbol.\n"
         "- A crypto Fear & Greed index score with 7-day delta.\n"
+        "- A list of CoinGecko trending coins over the last 24h, including id, "
+        "symbol, and market cap rank.\n"
         "- A coarse summary of recent whale activity on Solana.\n\n"
 
         "--- DECISION FRAMEWORK ---\n"
@@ -500,6 +510,15 @@ def build_graph(
                 )
 
         # Base context for the planner.
+        observations = state["observations"]
+
+        # Pull out CoinGecko trending lines for a dedicated section in the prompt.
+        trending_lines = [
+            line
+            for line in observations.splitlines()
+            if line.startswith("[coingecko_trending]")
+        ]
+
         user_prompt = (
             f"--- YOUR STATUS ---\n"
             f"Wallet balance: {balance} SOL\n"
@@ -508,8 +527,18 @@ def build_graph(
             f"Per-token balances: {token_summary}\n\n"
             f"--- YOUR LAST 2 ACTIONS ---\n"
             f"{last_two}\n\n"
-            f"--- TODAY'S OBSERVATIONS ---\n"
-            f"{state['observations']}\n\n"
+        )
+
+        if trending_lines:
+            user_prompt += (
+                "--- COINGECKO TRENDING COINS (LAST 24H) ---\n"
+                + "\n".join(trending_lines)
+                + "\n\n"
+            )
+
+        user_prompt += (
+            "--- TODAY'S OBSERVATIONS ---\n"
+            f"{observations}\n\n"
         )
 
         # On subsequent decision steps, feed back this run's latest research result
@@ -683,7 +712,13 @@ def build_graph(
 
                 # Network-aware policy checks (e.g. mainnet SOL balance floor).
                 network = NetworkDetector.detect(config.solana.rpc_url)
-                policy.check_swap(from_token, to_token, amount_usd, network)
+                policy.check_swap(
+                    from_token,
+                    to_token,
+                    amount_usd,
+                    network,
+                    amount_native=amount_sol,
+                )
 
                 # Convert SOL amount to lamports for input; for non-SOL tokens we
                 # still treat amount_sol as the SOL-equivalent notional for now.

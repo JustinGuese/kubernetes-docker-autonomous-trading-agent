@@ -48,6 +48,7 @@ class PolicyEngine:
         to_token: str,
         amount_usd: float,
         network: NetworkType,
+        amount_native: float | None = None,
     ) -> None:
         """Validate a proposed swap against policy rules.
 
@@ -78,13 +79,14 @@ class PolicyEngine:
             current_sol = float(positions.get("SOL", {}).get("amount", 0.0))
             min_balance = float(self.config.solana.mainnet_min_balance_sol)
 
-            # amount_usd is derived from SOL price in the agent; treat it as SOL
-            # notional for this safety check.
-            if current_sol - amount_usd < min_balance:
+            # Use the native SOL amount when available; fall back to the USD-derived
+            # estimate (treated as SOL notional) for backwards compatibility.
+            spend_sol = amount_native if amount_native is not None else amount_usd
+            if current_sol - spend_sol < min_balance:
                 raise PolicyViolation(
                     "Mainnet safety: swap would leave SOL balance below minimum "
                     f"({min_balance} SOL). Current: {current_sol:.3f}, "
-                    f"requested: {amount_usd:.3f}"
+                    f"requested: {spend_sol:.3f}"
                 )
 
     def check_swap_balance(self, wallet_tool, from_token: str, amount: float) -> None:
@@ -105,16 +107,9 @@ class PolicyEngine:
     # ── browser ───────────────────────────────────────────────────
 
     def check_browser_url(self, url: str) -> None:
-        """Raise PolicyViolation if the URL's domain is not allowlisted."""
-        parsed = urlparse(url)
-        domain = parsed.netloc.lower()
-        # Strip port if present
-        if ":" in domain:
-            domain = domain.split(":")[0]
-        if domain not in self.config.allowed_domains:
-            raise PolicyViolation(
-                f"Domain '{domain}' is not in the allowed scrape list"
-            )
+        """No domain restrictions - all URLs are allowed."""
+        # Domain whitelist removed - allow scraping any domain
+        pass
 
     # ── git / self-modification ───────────────────────────────────
 

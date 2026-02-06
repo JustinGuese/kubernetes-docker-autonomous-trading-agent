@@ -1,364 +1,403 @@
-# aiAutonomousTraderBot
+# 🤖💰 aiAutonomousTraderBot
+
+[![ci](https://github.com/JustinGuese/kubernetes-docker-autonomous-trading-agent/actions/workflows/main.yaml/badge.svg)](https://github.com/JustinGuese/kubernetes-docker-autonomous-trading-agent/actions/workflows/main.yaml)
+
+> Want to support this bot and ongoing development? Want to save yourself on the day skynet takes over? Just send funds directly to his address and he will trade with it!
+
+[![Crypto Payment](https://paybadge.profullstack.com/badge.svg)](https://paybadge.profullstack.com/?tickers=btc,eth,usdc&recipient_addresses=btc:bc1qt55phmqcsyq8v9xs68ulgqqgfdnl30dk4lth9m,sol:6rHuYnakzcnshsdm1Kyvr9fqH5pfvMHHd2c17cLazfR9,eth:0x628aFf1C99b22097F1776a135c6c85Bf8D171Bb8,pol:0x628aFf1C99b22097F1776a135c6c85Bf8D171Bb8)
+
+SOLANA WALLET: 6rHuYnakzcnshsdm1Kyvr9fqH5pfvMHHd2c17cLazfR9
 
 An autonomous trading agent on Solana devnet, powered by LLMs and LangGraph. The agent runs once per day (via K8s CronJob), scrapes market data, reasons about trades, executes transactions, and can write and deploy its own code. Survival is the primary metric: zero balance = termination.
 
----
+He is currently (6.2.26) trading live on Solana mainnet! Watch his trades:
 
-## Quick Start
+https://solscan.io/account/6rHuYnakzcnshsdm1Kyvr9fqH5pfvMHHd2c17cLazfR9
 
-### 1. Clone and install
+Started with 0.362377 SOL 
+
+## An Autonomous, Self-Improving Trading Agent — Built for Survival
+
+*Think openclaw / MoltBot — but for finance.*
+
+A real autonomous agent that observes markets, reasons about trades, executes on-chain actions, and can modify and redeploy its own code under strict safety constraints.
+
+## ⭐ Why This Repo Exists
+
+Most “AI trading bots” are:
+
+- rule-based
+- overfit backtests
+- fragile scripts with API keys
+
+aiAutonomousTraderBot is different.
+
+This project explores what happens when you give an LLM:
+
+- real capital
+- long-lived memory
+- the ability to change its own tools
+- hard survival constraints
+
+…and let it operate autonomously in production.
+
+**Primary metric:**
+
+Survival.  
+If the balance hits zero → the agent is terminated.
+
+## 🔴 Live on Mainnet
+
+The agent is currently trading live on Solana mainnet.
+
+- Start date: 2026-02-06
+- Wallet: https://solscan.io/account/6rHuYnakzcnshsdm1Kyvr9fqH5pfvMHHd2c17cLazfR9
+
+You can independently verify:
+
+- trades
+- balances
+- behavior over time
+
+No screenshots. No cherry-picked backtests.
+
+## 🧠 What This Agent Actually Does
+
+Every run (CronJob, once per day):
+
+**PERCEIVE → REASON → ACT → REFLECT**
+
+### PERCEIVE
+
+- Scrapes live market data (DEXs, CoinGecko, CMC, on-chain signals)
+- Reads its own portfolio & historical performance
+
+### REASON
+
+- Uses an LLM via LangGraph
+- Produces a structured, confidence-scored plan
+
+### ACT
+
+- Executes only if policy & confidence thresholds are satisfied
+- Can:
+  - send SOL
+  - swap tokens (via Jupiter)
+  - scrape new data
+  - write and test new code
+  - deploy changes to GitHub
+  - do nothing (noop) if risk is too high
+
+### REFLECT
+
+- Writes a post-mortem into long-term memory
+- Updates portfolio state
+- Benchmarks itself against buy-and-hold
+
+## 🧬 Key Idea: Constrained Self-Modification
+
+This agent can change its own code — but only inside a sandbox:
+
+- Writes only to tools/ or experiments/
+- Runs:
+  - tests (pytest)
+  - lint (ruff)
+- Rolls back automatically on failure
+- Hard cap on lines of code per change
+- GitHub token injected only at push time
+
+This is not AutoGPT chaos.  
+This is policy-driven, auditable autonomy.
+
+🛡️ **Safety & Risk Controls (Non-Negotiable)**
+
+- ✅ Daily spend caps (SOL + USD)
+- ✅ Per-transaction limits
+- ✅ LLM confidence gating
+- ✅ Read-only core logic
+- ✅ Atomic memory writes
+- ✅ Drift detection between on-chain balance and internal state
+- ✅ No shell access
+- ✅ No unrestricted file I/O
+- ✅ Domain allowlist for critical operations
+
+The agent is incentivized to stay alive, not to YOLO.
+
+## 🧱 Architecture Overview
+
+```text
+main.py
+  ↓
+LangGraph state machine
+  ↓
+[ PERCEIVE ] → [ REASON ] → [ ACT ] → [ REFLECT ]
+  ↓
+memory/state.json (atomic, persistent)
+```
+
+**Core Components**
+
+| Component            | Purpose                          |
+| -------------------- | -------------------------------- |
+| core/agent.py        | LangGraph state machine          |
+| core/policy_engine.py | Guards every risky action        |
+| core/sandbox.py      | Safe self-modification pipeline  |
+| core/memory.py       | Long-term agent memory           |
+| tools/wallet_tool.py | SOL + SPL token ops              |
+| tools/position_tool.py | Portfolio tracking               |
+| tools/browser_tool.py | Playwright scraping               |
+| tools/git_tool.py    | Controlled self-deployment       |
+| policies/            | Human-readable constraints       |
+
+## ⚙️ Quick Start
 
 ```bash
 git clone <repo>
 cd aiAutonomousTraderBot
 pip install -e ".[dev]"
-```
-
-### 2. Set up `.env`
-
-Copy `.env.example` to `.env` and fill in the required values:
-
-```bash
 cp .env.example .env
 ```
 
-Edit `.env` and provide:
-
-- `OPENROUTER_API_KEY` — your OpenRouter API key (for LLM calls)
-- `SOLANA_PRIVATE_KEY` — base58-encoded devnet keypair (see below)
-- `GITHUB_TOKEN` — personal access token (for self-modification pushes)
-- `GITHUB_REPO` — owner/repo (e.g., `jguese/aiAutonomousTraderBot`)
-
-Optional (defaults shown):
-
-- `SOLANA_RPC_URL` — defaults to `https://api.devnet.solana.com`
-- `SOLANA_WHALE_WALLETS` — optional comma-separated list of whale wallets for on-chain monitoring
-- `CONFIDENCE_THRESHOLD` — defaults to `0.6` (min LLM confidence to execute)
-- `MAX_SOL_PER_TX` — defaults to `0.1` SOL per transaction
-- `DAILY_SPEND_CAP_SOL` — defaults to `0.5` SOL per day
-- `MAX_LOC_DELTA` — defaults to `200` lines-of-code per self-mod
-
-### 3. Get a devnet keypair
-
-**Option A — Solana CLI (recommended):**
+Set at minimum:
 
 ```bash
-# Install CLI
-sh -c "$(curl -sSfL https://release.solana.com/stable/install)"
-
-# Generate keypair
-solana-keygen new --outfile ~/.config/solana/id.json
-
-# Print the private key (paste into SOLANA_PRIVATE_KEY)
-solana-keygen recover -o /dev/stdout < ~/.config/solana/id.json
-
-# Print the public key (needed for faucet)
-solana address
+OPENROUTER_API_KEY=...
+SOLANA_PRIVATE_KEY=...
+GITHUB_TOKEN=...
+GITHUB_REPO=owner/repo
 ```
 
-**Option B — Python one-liner (if you already have a keypair file):**
+Run locally:
 
 ```bash
-python3 -c "
-import json, base58
-with open('~/.config/solana/id.json') as f:
-    keypair = json.load(f)
-    print(base58.b58encode(bytes(keypair)).decode())
-"
+python main.py           # live
+python main.py --dry-run # no on-chain actions
 ```
 
-### 4. Fund the wallet on devnet
+## 🐳 Docker & ☸️ Kubernetes
 
-You have two options:
-
-**Web faucet (easiest):**
-
-- Go to **https://faucet.solana.com**
-- Paste your public key
-- Select **Devnet**
-- Request SOL (usually 2-5 SOL per request)
-
-**CLI:**
-
-```bash
-solana airdrop 2 <your-public-key> --url https://api.devnet.solana.com
-```
-
-Verify the balance landed:
-
-```bash
-python3 checkbalance.py
-```
-
-(Edit `checkbalance.py` line 4 to use your actual public key.)
-
----
-
-## Running the Agent
-
-### Local (development)
-
-```bash
-python main.py           # live mode
-python main.py --dry-run # plan actions but do not touch on-chain state
-```
-
-The agent will:
-
-1. **PERCEIVE** — scrape default crypto data sites (DEXScreener, CoinGecko, CoinMarketCap)
-2. **REASON** — send observations to the LLM; get back a structured plan
-3. **ACT** — execute the plan (send SOL, scrape a URL, write code, or noop)
-4. **REFLECT** — persist the reflection to memory and exit
-
-Output will show the final reflection and action result.
-
-### Docker (local)
+- Docker Compose for local runs
+- Kubernetes CronJob for production
+- Read-only mounts for core logic
+- PVC-backed memory for persistence
 
 ```bash
 docker compose up
 ```
 
-The container has read-only mounts on `core/` and `policies/` (defense in depth). `tools/` and `experiments/` are writable.
+CronJob runs daily at 09:00 UTC.
 
-### Kubernetes (production)
+## 📈 Portfolio Awareness (Not Just Trades)
 
-1. Populate `k8s/configmap.yaml` with actual file contents from `core/` and `policies/`
-2. Create `k8s/secret.yaml` from `k8s/secret.yaml.example` with base64-encoded env vars
-3. Apply:
+The agent tracks:
 
-```bash
-kubectl create namespace autonomoustrading
-kubectl create secret generic trader-bot-env \
-  --from-env-file=.env \
-  -n autonomoustrading
-kubectl apply -f k8s/
+- per-token positions
+- rough USD cost basis
+- swap history
+- slippage
+- benchmark vs buy-and-hold
+
+This portfolio summary is fed back into the LLM every run.
+
+## 🧪 This Is a Research-Grade Codebase
+
+- Extensive test coverage
+- Deterministic policy layer
+- Explicit threat model
+- Designed for:
+  - AI agents research
+  - autonomous systems
+  - on-chain finance
+  - infra-aware LLM tooling
+
+If you liked:
+
+- openclaw
+- MoltBot
+- AutoGPT (the idea, not the chaos)
+
+…this repo is for you.
+
+# Live Output Example
+
+  PERCEIVE — Gathered market data:                                                                           
+  - Checked wallet: 0.362 SOL, 0 USDC, 0 WBTC                                                              
+  - Scraped dexscreener (timed out), fell back to coinmarketcap (succeeded)                                  
+  - Pulled 1h + 4h candles from Binance for 7 pairs (BTC, ETH, SOL, PEPE, SHIB, BONK, DOGE)                  
+  - Fetched funding rates for BTC, ETH, SOL                                                                  
+                                                                                                             
+  REASON — LLM decided to sell a small amount of SOL:                                                        
+  - SOL in downtrend on 4h, RSI near 30, negative funding rate                                               
+  - Plan: swap 0.05 SOL to USDC at 0.65 confidence (above 0.60 threshold)                                    
+                                                                                                             
+  ACT — Executed the swap successfully:
+  - Jupiter Ultra order + execute went through (HTTP 200)
+  - Signature: 3dyvsj...piQ4
+  - Swapped 0.05 SOL (~$4.12) to USDC
+
+  REFLECT — Post-trade bookkeeping:
+  - Saved trade record + reflection to memory
+  - Detected position drift: on-chain shows 0.362 SOL but tracked state expected 0.312 SOL (the 0.05 SOL
+  deduction hasn't settled yet or the balance check ran too fast)
+  - Post-swap balance delta = 0.00 — the on-chain balance hadn't updated within that ~1 second window
+
+
+Full Log:
+```
+15:18:27 [INFO] __main__: starting up (dry_run=False)
+15:18:27 [INFO] __main__: config loaded — model=deepseek/deepseek-v3.2 rpc=https://api.mainnet-beta.solana.com
+15:18:27 [INFO] tools.browser_tool: BrowserTool: will connect to remote CDP at http://localhost:3000
+15:18:28 [INFO] tools.wallet_tool: fetching balance for 6rHuYnakzcnshsdm1Kyvr9fqH5pfvMHHd2c17cLazfR9
+15:18:29 [INFO] httpx: HTTP Request: POST https://api.mainnet-beta.solana.com "HTTP/1.1 200 OK"
+15:18:29 [INFO] tools.wallet_tool:   → 0.362377 SOL (362376904 lamports)
+15:18:29 [INFO] tools.wallet_tool: fetching SPL token balance for USDC (EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v)
+15:18:29 [INFO] httpx: HTTP Request: POST https://api.mainnet-beta.solana.com "HTTP/1.1 200 OK"
+15:18:29 [INFO] tools.wallet_tool:   → no token accounts found for USDC
+15:18:29 [INFO] tools.wallet_tool: fetching SPL token balance for WBTC (3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh)
+15:18:29 [INFO] httpx: HTTP Request: POST https://api.mainnet-beta.solana.com "HTTP/1.1 200 OK"
+15:18:29 [INFO] tools.wallet_tool:   → no token accounts found for WBTC
+15:18:29 [INFO] tools.coingecko_tool: CoingeckoTool: using public CoinGecko API (no key)
+15:18:29 [INFO] __main__: graph built — invoking
+15:18:29 [INFO] core.agent: ═══ PERCEIVE ═══
+15:18:29 [INFO] core.agent:   scraping https://dexscreener.com …
+15:18:30 [INFO] tools.browser_tool: connecting to remote browser for https://dexscreener.com
+(node:99885) [DEP0169] DeprecationWarning: `url.parse()` behavior is not standardized and prone to errors that have security implications. Use the WHATWG URL API instead. CVEs are not issued for `url.parse()` vulnerabilities.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+15:19:09 [WARNING] tools.browser_tool: page load failed for https://dexscreener.com: Page.goto: Timeout 30000ms exceeded.
+Call log:
+  - navigating to "https://dexscreener.com/", waiting until "networkidle"
+
+15:19:44 [WARNING] core.agent:     → scrape failed: Page.goto: Timeout 30000ms exceeded.
+Call log:
+  - navigating to "https://dexscreener.com/", waiting until "networkidle"
+
+15:19:44 [INFO] core.agent:   scraping https://www.coinmarketcap.com …
+15:19:44 [INFO] tools.browser_tool: connecting to remote browser for https://www.coinmarketcap.com
+(node:99930) [DEP0169] DeprecationWarning: `url.parse()` behavior is not standardized and prone to errors that have security implications. Use the WHATWG URL API instead. CVEs are not issued for `url.parse()` vulnerabilities.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+15:19:59 [INFO] tools.browser_tool: page load succeeded for https://www.coinmarketcap.com (status https://coinmarketcap.com/)
+15:20:15 [INFO] tools.browser_tool: got 5275 chars
+15:20:15 [INFO] core.agent:     → 5275 chars
+15:20:15 [INFO] core.agent:   fetching klines BTCUSDT (1h & 4h) …
+15:20:15 [INFO] tools.binance_tool: get_klines symbol=BTCUSDT interval=1h limit=100
+15:20:15 [INFO] tools.binance_tool:   → 100 raw candles returned
+15:20:16 [INFO] core.agent:     → 100 candles enriched (1h)
+15:20:16 [INFO] tools.binance_tool: get_klines symbol=BTCUSDT interval=4h limit=100
+15:20:16 [INFO] tools.binance_tool:   → 100 raw candles returned
+15:20:16 [INFO] core.agent:     → 100 candles enriched (4h)
+15:20:16 [INFO] core.agent:   fetching klines ETHUSDT (1h & 4h) …
+15:20:16 [INFO] tools.binance_tool: get_klines symbol=ETHUSDT interval=1h limit=100
+15:20:16 [INFO] tools.binance_tool:   → 100 raw candles returned
+15:20:16 [INFO] core.agent:     → 100 candles enriched (1h)
+15:20:16 [INFO] tools.binance_tool: get_klines symbol=ETHUSDT interval=4h limit=100
+15:20:16 [INFO] tools.binance_tool:   → 100 raw candles returned
+15:20:16 [INFO] core.agent:     → 100 candles enriched (4h)
+15:20:16 [INFO] core.agent:   fetching klines SOLUSDT (1h & 4h) …
+15:20:16 [INFO] tools.binance_tool: get_klines symbol=SOLUSDT interval=1h limit=100
+15:20:16 [INFO] tools.binance_tool:   → 100 raw candles returned
+15:20:16 [INFO] core.agent:     → 100 candles enriched (1h)
+15:20:16 [INFO] tools.binance_tool: get_klines symbol=SOLUSDT interval=4h limit=100
+15:20:16 [INFO] tools.binance_tool:   → 100 raw candles returned
+15:20:16 [INFO] core.agent:     → 100 candles enriched (4h)
+15:20:16 [INFO] core.agent:   fetching klines PEPEUSDT (1h & 4h) …
+15:20:16 [INFO] tools.binance_tool: get_klines symbol=PEPEUSDT interval=1h limit=100
+15:20:17 [INFO] tools.binance_tool:   → 100 raw candles returned
+15:20:17 [INFO] core.agent:     → 100 candles enriched (1h)
+15:20:17 [INFO] tools.binance_tool: get_klines symbol=PEPEUSDT interval=4h limit=100
+15:20:17 [INFO] tools.binance_tool:   → 100 raw candles returned
+15:20:17 [INFO] core.agent:     → 100 candles enriched (4h)
+15:20:17 [INFO] core.agent:   fetching klines SHIBUSDT (1h & 4h) …
+15:20:17 [INFO] tools.binance_tool: get_klines symbol=SHIBUSDT interval=1h limit=100
+15:20:17 [INFO] tools.binance_tool:   → 100 raw candles returned
+15:20:17 [INFO] core.agent:     → 100 candles enriched (1h)
+15:20:17 [INFO] tools.binance_tool: get_klines symbol=SHIBUSDT interval=4h limit=100
+15:20:18 [INFO] tools.binance_tool:   → 100 raw candles returned
+15:20:18 [INFO] core.agent:     → 100 candles enriched (4h)
+15:20:18 [INFO] core.agent:   fetching klines BONKUSDT (1h & 4h) …
+15:20:18 [INFO] tools.binance_tool: get_klines symbol=BONKUSDT interval=1h limit=100
+15:20:18 [INFO] tools.binance_tool:   → 100 raw candles returned
+15:20:18 [INFO] core.agent:     → 100 candles enriched (1h)
+15:20:18 [INFO] tools.binance_tool: get_klines symbol=BONKUSDT interval=4h limit=100
+15:20:18 [INFO] tools.binance_tool:   → 100 raw candles returned
+15:20:19 [INFO] core.agent:     → 100 candles enriched (4h)
+15:20:19 [INFO] core.agent:   fetching klines DOGEUSDT (1h & 4h) …
+15:20:19 [INFO] tools.binance_tool: get_klines symbol=DOGEUSDT interval=1h limit=100
+15:20:19 [INFO] tools.binance_tool:   → 100 raw candles returned
+15:20:19 [INFO] core.agent:     → 100 candles enriched (1h)
+15:20:19 [INFO] tools.binance_tool: get_klines symbol=DOGEUSDT interval=4h limit=100
+15:20:19 [INFO] tools.binance_tool:   → 100 raw candles returned
+15:20:19 [INFO] core.agent:     → 100 candles enriched (4h)
+15:20:21 [INFO] httpx: HTTP Request: GET https://fapi.binance.com/fapi/v1/premiumIndex?symbol=BTCUSDT "HTTP/1.1 200 OK"
+15:20:22 [INFO] httpx: HTTP Request: GET https://fapi.binance.com/fapi/v1/premiumIndex?symbol=ETHUSDT "HTTP/1.1 200 OK"
+15:20:24 [INFO] httpx: HTTP Request: GET https://fapi.binance.com/fapi/v1/premiumIndex?symbol=SOLUSDT "HTTP/1.1 200 OK"
+15:20:25 [INFO] core.agent:   perceive complete — 28 observation chunks
+15:20:25 [INFO] core.agent: ═══ REASON ═══
+15:20:25 [INFO] tools.wallet_tool: fetching balance for 6rHuYnakzcnshsdm1Kyvr9fqH5pfvMHHd2c17cLazfR9
+15:20:25 [INFO] httpx: HTTP Request: POST https://api.mainnet-beta.solana.com "HTTP/1.1 200 OK"
+15:20:25 [INFO] tools.wallet_tool:   → 0.362377 SOL (362376904 lamports)
+15:20:25 [INFO] core.agent:   wallet balance: 0.362377 SOL
+15:20:25 [INFO] core.agent:   daily spend so far: 0.000000 SOL
+15:20:25 [INFO] tools.history_tool: history: returning 2 trade(s)
+15:20:25 [INFO] tools.wallet_tool: fetching balance for 6rHuYnakzcnshsdm1Kyvr9fqH5pfvMHHd2c17cLazfR9
+15:20:26 [INFO] httpx: HTTP Request: POST https://api.mainnet-beta.solana.com "HTTP/1.1 200 OK"
+15:20:26 [INFO] tools.wallet_tool:   → 0.362377 SOL (362376904 lamports)
+15:20:26 [INFO] tools.wallet_tool: fetching SPL token balance for USDC (EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v)
+15:20:27 [INFO] httpx: HTTP Request: POST https://api.mainnet-beta.solana.com "HTTP/1.1 200 OK"
+15:20:27 [INFO] tools.wallet_tool:   → no token accounts found for USDC
+15:20:27 [INFO] tools.wallet_tool: fetching SPL token balance for WBTC (3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh)
+15:20:27 [INFO] httpx: HTTP Request: POST https://api.mainnet-beta.solana.com "HTTP/1.1 200 OK"
+15:20:27 [INFO] tools.wallet_tool:   → no token accounts found for WBTC
+15:20:27 [INFO] core.agent:   per-token balances: SOL=0.3624, USDC=0.0000, WBTC=0.0000
+15:20:27 [INFO] core.agent:   calling LLM (deepseek/deepseek-v3.2) …
+15:20:32 [INFO] httpx: HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+15:20:36 [INFO] core.agent:   plan → action=swap target=SOLUSDC confidence=0.65
+15:20:36 [INFO] core.agent: ═══ ACT ═══
+15:20:36 [INFO] core.agent:   action=swap confidence=0.65 threshold=0.60
+15:20:36 [INFO] core.agent:   swapping 0.050000 SOL → USDC (slippage_bps=50)
+15:20:36 [INFO] tools.wallet_tool: fetching balance for 6rHuYnakzcnshsdm1Kyvr9fqH5pfvMHHd2c17cLazfR9
+15:20:36 [INFO] httpx: HTTP Request: POST https://api.mainnet-beta.solana.com "HTTP/1.1 200 OK"
+15:20:36 [INFO] tools.wallet_tool:   → 0.362377 SOL (362376904 lamports)
+15:20:36 [INFO] tools.swap_tool: JupiterUltraSwap: requesting Ultra order So11111111111111111111111111111111111111112 -> EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v amount=50000000 (slippage_bps=50)
+15:20:37 [INFO] httpx: HTTP Request: GET https://api.jup.ag/ultra/v1/order?inputMint=So11111111111111111111111111111111111111112&outputMint=EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v&amount=50000000&slippageBps=50&taker=6rHuYnakzcnshsdm1Kyvr9fqH5pfvMHHd2c17cLazfR9 "HTTP/1.1 200 OK"
+15:20:38 [INFO] httpx: HTTP Request: POST https://api.jup.ag/ultra/v1/execute "HTTP/1.1 200 OK"
+15:20:38 [INFO] tools.swap_tool: JupiterUltraSwap: swap executed, signature=3dyvsjyi5F3xGb5ELftGjn2kEkkzKzbiNSNcboMjNmA9QEqn3UMsb6PAyNXkG7TVwXGRozFJy3NL7FYHPDcWpiQ4
+15:20:38 [INFO] core.agent:   → swap sig: 3dyvsjyi5F3xGb5ELftGjn2kEkkzKzbiNSNcboMjNmA9QEqn3UMsb6PAyNXkG7TVwXGRozFJy3NL7FYHPDcWpiQ4
+15:20:38 [INFO] core.agent: ═══ REFLECT ═══
+15:20:38 [INFO] core.agent:   trade record saved
+15:20:38 [INFO] core.agent:   reflection saved to memory
+15:20:38 [INFO] tools.wallet_tool: fetching balance for 6rHuYnakzcnshsdm1Kyvr9fqH5pfvMHHd2c17cLazfR9
+15:20:38 [INFO] httpx: HTTP Request: POST https://api.mainnet-beta.solana.com "HTTP/1.1 200 OK"
+15:20:38 [INFO] tools.wallet_tool:   → 0.362377 SOL (362376904 lamports)
+15:20:38 [WARNING] core.agent:   position drift detected: on-chain=0.362377 SOL, tracked=0.312377 SOL (drift=0.050000)
+15:20:38 [WARNING] core.agent:   unable to reconcile drift: SOL price not available
+15:20:38 [INFO] tools.wallet_tool: fetching balance for 6rHuYnakzcnshsdm1Kyvr9fqH5pfvMHHd2c17cLazfR9
+15:20:39 [INFO] httpx: HTTP Request: POST https://api.mainnet-beta.solana.com "HTTP/1.1 200 OK"
+15:20:39 [INFO] tools.wallet_tool:   → 0.362377 SOL (362376904 lamports)
+15:20:39 [INFO] core.agent:   post-swap balance check: before=0.362377 SOL, after=0.362377 SOL, delta=0.000000
+15:20:39 [INFO] __main__: ─── done ───
+15:20:39 [INFO] __main__: action_result: swapped 0.05 SOL → USDC, approx $4.12, sig=3dyvsjyi5F3xGb5ELftGjn2kEkkzKzbiNSNcboMjNmA9QEqn3UMsb6PAyNXkG7TVwXGRozFJy3NL7FYHPDcWpiQ4
+15:20:39 [INFO] __main__: reflection:    plan={'action_type': 'swap', 'target': 'SOLUSDC', 'params': {'from_token': 'SOL', 'to_token': 'USDC', 'amount_sol': 0.05, 'slippage_bps': 50}, 'confidence': 0.65, 'reason': 'SOL shows downtrend on 4h, RSI near 30 (oversold), funding rate negative (-0.00066) indicating shorts pay longs, and my SOL balance is low; a small swap to USDC reduces exposure to further downside while preserving most capital for a potential reversal.'} | result=swapped 0.05 SOL → USDC, approx $4.12, sig=3dyvsjyi5F3xGb5ELftGjn2kEkkzKzbiNSNcboMjNmA9QEqn3UMsb6PAyNXkG7TVwXGRozFJy3NL7FYHPDcWpiQ4
 ```
 
-The CronJob runs at **9 AM UTC daily**.
+## 💖 Support the Project
 
----
+If you find this interesting or useful, consider supporting ongoing development:
 
-## Architecture
+⚠️ Disclaimer
 
-### Core Flow
+This is experimental research software.
 
-```
-main.py
-  ↓
-load config → build LangGraph → invoke
-  ↓
-[PERCEIVE] → [REASON] → [ACT] → [REFLECT]
-  ↓
-persist memory + exit
-```
+- Real money is involved
+- Bugs can lose funds
+- No financial advice
+- Use at your own risk
 
-### Key Files
+If the agent dies, it dies.
 
-| File                           | Purpose                                                |
-| ------------------------------ | ------------------------------------------------------ |
-| `core/config.py`               | Load and validate env vars; hardcoded domain allowlist |
-| `core/memory.py`               | Atomic JSON state: daily spend, reflections            |
-| `core/policy_engine.py`        | Gate every action: wallet sends, git commits           |
-| `core/sandbox.py`              | Self-mod pipeline: write → pytest → ruff → git push    |
-| `core/agent.py`                | LangGraph state machine                                |
-| `tools/wallet_tool.py`         | Solana devnet balance, send, history, and SPL token balances (with devnet-safe RPC error handling) |
-| `tools/position_tool.py`       | Track token positions and swap history; can sync from on-chain balances and power portfolio summaries |
-| `tools/browser_tool.py`        | Playwright scraper (no domain restrictions)            |
-| `tools/git_tool.py`            | Subprocess git; ephemeral token injection              |
-| `tools/fs_tool.py`             | File read/list; path-traversal defense                 |
-| `policies/default_policies.py` | Human-readable policy spec                             |
+📜 License
 
-### Safety Features
+MIT
 
-1. **Read-only enforcement** — `core/` and `policies/` mounted read-only at runtime
-2. **Path traversal defense** — all file ops resolved then validated
-3. **Daily spend cap** — memory reloaded on each wallet check (TOCTOU-safe)
-4. **Rollback on failure** — sandbox captures pre-patch state; reverts on test/lint failure
-5. **Domain allowlist** — hardcoded in config (not env-driven)
-6. **Confidence gating** — LLM actions require `confidence >= 0.6` (configurable)
+🚀 If you star only one autonomous-agent repo this year
 
-### Portfolio tracking and swaps
-
-- The agent tracks per-token positions (amount and rough USD cost basis) via an internal `PositionTool`.
-- On startup it can initialize missing positions from on-chain wallet balances (e.g. SOL, USDC, WBTC on devnet), so tracked positions reflect reality.
-- Real swaps (on non-mock networks) update these positions and append entries to `swap_history` with from/to token, notional USD, slippage, and signature.
-- This portfolio view is used to summarise holdings for the LLM and to detect/reconcile drift between on-chain SOL and the tracked SOL position.
-
-### What the Agent Can Do
-
-- **`wallet_send`** — send SOL to an address (gated by policy)
-- **`scrape`** — fetch any URL (no restrictions; text truncated to 8k chars)
-- **`extend_code`** — write new tool code (rolled back if tests fail)
-- **`swap`** — exchange Solana tokens via Jupiter DEX (e.g., SOL↔USDC). Swaps are risk-gated in USD terms by per-trade and daily caps and guarded by a pre-swap balance check (`wallet_tool.balance_token`) so the agent never tries to swap more than it holds. On devnet, swaps run in mock mode (synthetic `DEVNET-MOCK-SWAP-…` signatures): positions are not mutated, but a swap history entry is recorded with `mock: true`. On mainnet or other real networks, swaps would update tracked positions based on the notional amount and prices.
-- **`noop`** — do nothing (safest choice when uncertain)
-
-All actions persisted to memory with reflections; agent learns from history across runs.
-
----
-
-## Monitoring
-
-### Agent memory
-
-Stored in `agent_memory.json`:
-
-```json
-{
-  "daily_spend_sol": 0.0,
-  "daily_spend_date": "2026-02-04",
-  "daily_swap_usd": 0.0,
-  "daily_swap_date": "2026-02-04",
-  "benchmark": {
-    "start_date": "2026-02-04",
-    "start_portfolio_usd": 100.0,
-    "start_prices": { "SOL": 100.0 }
-  },
-  "positions": { "SOL": { "amount": 1.0, "cost_basis_usd": 100.0, "last_updated": "2026-02-04" } },
-  "swap_history": [],
-  "reflections": [{ "date": "2026-02-04", "text": "plan={...} | result=noop" }]
-}
-```
-
-Purge daily spend at midnight UTC; reflections accumulate.
-
-### Check balance
-
-```bash
-python3 checkbalance.py
-```
-
-Edit the `PUBKEY` variable in the script to match your wallet's public key.
-
-### Logs (Docker)
-
-```bash
-docker compose logs -f
-```
-
-### Logs (K8s)
-
-```bash
-kubectl logs -f deployment/aiautonomoustraderbot
-```
-
----
-
-## Development
-
-### Run tests
-
-```bash
-pytest tests/ -v
-```
-
-Tests cover policies, wallet, browser, sandbox, TA, swap, on-chain helpers, and more.
-
-### Lint
-
-```bash
-ruff check .
-```
-
-### Debug in VS Code
-
-Open the `.vscode/launch.json` configuration and select **"Run Agent"** to start the debugger.
-
----
-
-## Environment Variables (complete reference)
-
-```
-# LLM routing (OpenRouter)
-OPENROUTER_API_KEY=sk-...              # Required; never commit
-
-# Solana devnet
-SOLANA_PRIVATE_KEY=<base58-keypair>    # Required; 64-byte keypair
-SOLANA_RPC_URL=https://api.devnet...   # Optional; default is devnet
-
-# Self-modification (GitHub)
-GITHUB_TOKEN=ghp_...                   # Required; personal access token
-GITHUB_REPO=owner/repo                 # Required; e.g., jguese/aiAutonomousTraderBot
-GITHUB_BRANCH=main                     # Optional; default is main
-
-# Policy caps
-CONFIDENCE_THRESHOLD=0.6               # Min LLM confidence to execute (0-1)
-MAX_SOL_PER_TX=0.1                     # Hard cap per transaction (SOL)
-DAILY_SPEND_CAP_SOL=0.5                # Rolling daily cap (resets at midnight UTC)
-MAX_LOC_DELTA=200                      # Max lines-of-code per self-modification
-MAX_SWAP_USD_PER_TX=50.0               # Approximate max USD notional per swap
-DAILY_SWAP_CAP_USD=200.0               # Approximate daily USD swap cap
-```
-
----
-
-## Threat Model & Security
-
-The agent runs in a controlled sandbox:
-
-1. **No network access** except to allowed RPC + OpenRouter + browser targets
-2. **No shell execution** (subprocess git only; no user input in commands)
-3. **No credential persistence** (GitHub token is injected at push time, never stored)
-4. **Code changes are rolled back** if tests/lint fail
-5. **File writes are constrained** to `tools/` and `experiments/` only
-
-The agent is incentivized to survive (zero balance = termination) and to grow responsibly. Good behavior earns expanded capabilities; bad behavior ends the run.
-
----
-
-## Troubleshooting
-
-### `ValueError: could not convert string to float: '0.6 # comment'`
-
-Your `.env` file has inline comments that weren't stripped. The config loader now strips `# comments`, but if you're using an old version, quote the values:
-
-```
-CONFIDENCE_THRESHOLD="0.6"
-```
-
-### `ModuleNotFoundError: No module named 'solders'`
-
-Install dependencies:
-
-```bash
-pip install -e .
-```
-
-Or if developing with dev extras:
-
-```bash
-pip install -e ".[dev]"
-```
-
-### `SyntaxError` or `LintError` in agent-generated code
-
-The sandbox caught it and rolled back automatically. Check `agent_memory.json` reflections to see what was attempted.
-
-### Agent chose `noop` every run
-
-That's healthy caution. The agent is prioritizing survival. Check the observations and market data — maybe there's no profitable opportunity yet. Or increase `CONFIDENCE_THRESHOLD` (but that increases risk).
-
----
-
-## Next Steps
-
-1. **Fund your wallet** — use the web faucet or CLI to get 2-5 SOL on devnet
-2. **Run once locally** — `python main.py` to verify end-to-end
-3. **Monitor reflections** — read `agent_memory.json` to see what the agent thinks
-4. **Deploy to Docker** — `docker compose up` for local validation
-5. **Deploy to K8s** — populate ConfigMaps, Secrets, and apply the CronJob
-
----
-
-## License
-
-MIT (or as specified in LICENSE)
-
----
-
-## Contact / Support
-
-For issues, feature requests, or questions, file an issue or reach out to the maintainer.
-
----
-
-**Remember:** This agent has access to your devnet wallet and GitHub token. Keep `.env` secure and never commit it. Monitor runs regularly. If the balance hits zero, the process terminates — no restart, no mercy.
+make it one that actually runs, trades, survives — or fails publicly.

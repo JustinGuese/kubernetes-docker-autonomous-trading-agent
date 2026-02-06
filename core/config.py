@@ -10,17 +10,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-# Hardcoded domain allowlist — security boundary, not env-driven.
-ALLOWED_SCRAPE_DOMAINS: frozenset[str] = frozenset(
-    {
-        "dexscreener.com",
-        "coingecko.com",
-        "coinmarketcap.com",
-        "solana.com",
-        "solprice.com",
-        "alternative.me",
-    }
-)
+# Domain allowlist removed - all domains are allowed for scraping.
+# Kept for backwards compatibility but no longer enforced.
+ALLOWED_SCRAPE_DOMAINS: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)

@@ -41,11 +41,19 @@ class TestSwapStrategies:
         keypair = Keypair()
         rpc = MagicMock()
 
-        # Build a minimal-but-valid empty transaction to satisfy from_bytes.
+        # Build a minimal unsigned transaction whose first account key is the
+        # taker's pubkey so the signing loop can find and replace its slot.
         import base64
+        from solders.hash import Hash
+        from solders.instruction import Instruction
+        from solders.message import MessageV0
+        from solders.signature import Signature
         from solders.transaction import VersionedTransaction
 
-        dummy_tx = VersionedTransaction.default()
+        msg = MessageV0.try_compile(
+            keypair.pubkey(), [Instruction(keypair.pubkey(), b"", [])], [], Hash.default()
+        )
+        dummy_tx = VersionedTransaction.populate(msg, [Signature.default()])
         unsigned_b64 = base64.b64encode(bytes(dummy_tx)).decode("utf-8")
 
         mock_get.return_value.status_code = 200
