@@ -13,15 +13,11 @@ from solders.pubkey import Pubkey
 from solders.system_program import TransferParams, transfer
 from solders.transaction import Transaction
 
+from core.network_config import NetworkDetector, NetworkTokens, NetworkType
+
 logger = logging.getLogger(__name__)
 
 _LAMPORTS_PER_SOL = 1_000_000_000
-
-KNOWN_MINTS = {
-    "SOL": "So11111111111111111111111111111111111111112",
-    "USDC": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-    "WBTC": "3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh",
-}
 
 TOKEN_DECIMALS = {"SOL": 9, "USDC": 6, "WBTC": 8}
 
@@ -32,6 +28,12 @@ class WalletTool:
         self.keypair = Keypair.from_bytes(raw)
         self.pubkey = self.keypair.pubkey()
         self.client = Client(rpc_url)
+        self._rpc_url = rpc_url
+        self._network: NetworkType = NetworkDetector.detect(rpc_url)
+        self._tokens: NetworkTokens = NetworkDetector.get_tokens(self._network)
+        # Logical symbols the wallet exposes; some may not be supported on all
+        # networks (e.g. WBTC on devnet).
+        self._supported_symbols: tuple[str, ...] = ("SOL", "USDC", "WBTC")
 
     # ── queries ───────────────────────────────────────────────────
 
@@ -55,9 +57,23 @@ class WalletTool:
         if sym == "SOL":
             return self.balance_sol()
 
-        mint = KNOWN_MINTS.get(sym)
-        if not mint:
-            raise ValueError(f"Unsupported token symbol for balance lookup: {symbol}")
+        if sym not in self._supported_symbols:
+            raise ValueError(
+                f"Unsupported token symbol for balance lookup: {symbol}"
+            )
+
+        # Resolve network-specific mint. Some tokens (e.g. WBTC on devnet) may
+        # not exist on a given network; in that case we treat the balance as 0.
+        try:
+            mint = self._tokens.mint_for_symbol(sym)
+        except ValueError as exc:
+            logger.warning(
+                "token %s is not supported on %s network for wallet balance lookup: %s",
+                sym,
+                self._network.value,
+                exc,
+            )
+            return 0.0
 
         logger.info("fetching SPL token balance for %s (%s)", sym, mint)
         # solana-py expects a Pubkey for the mint field inside TokenAccountOpts.
@@ -111,7 +127,7 @@ class WalletTool:
     def get_all_balances(self) -> dict[str, float]:
         """Return a mapping of known token symbols to their balances."""
         balances: dict[str, float] = {}
-        for symbol in KNOWN_MINTS.keys():
+        for symbol in self._supported_symbols:
             try:
                 balances[symbol] = self.balance_token(symbol)
             except Exception as exc:

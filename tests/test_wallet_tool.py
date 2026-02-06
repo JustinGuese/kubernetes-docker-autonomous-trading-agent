@@ -7,7 +7,7 @@ import pytest
 from solders.hash import Hash
 from solders.keypair import Keypair
 
-from tools.wallet_tool import KNOWN_MINTS, WalletTool
+from tools.wallet_tool import WalletTool
 
 # ── fixtures ──────────────────────────────────────────────────────────────────
 
@@ -62,8 +62,8 @@ class TestWalletTokenBalances:
         tool.balance_token = _fake_balance  # type: ignore[assignment]
         balances = tool.get_all_balances()
 
-        # Should query every known mint exactly once.
-        assert set(calls) == set(KNOWN_MINTS.keys())
+        # Should query every supported symbol exactly once.
+        assert set(calls) == {"SOL", "USDC", "WBTC"}
         assert balances["SOL"] == 1.0
         assert balances["USDC"] == 2.0
 
@@ -85,7 +85,7 @@ class TestWalletTokenBalances:
 
     @patch("tools.wallet_tool.Client")
     def test_balance_token_rpc_error_returns_zero(self, mock_client_cls: MagicMock) -> None:
-        """If the RPC rejects the mint (e.g. on devnet), treat as zero balance."""
+        """If the RPC rejects the mint, treat as zero balance."""
         from solders.keypair import Keypair
 
         kp = Keypair()

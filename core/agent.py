@@ -6,6 +6,8 @@ import asyncio
 import json
 import logging
 import re
+from datetime import datetime
+from pathlib import Path
 from typing import Any, TypedDict
 
 from binance import Client
@@ -15,6 +17,7 @@ from langgraph.graph.state import CompiledStateGraph
 
 from core.config import AppConfig
 from core.memory import MemoryStore
+from core.network_config import NetworkDetector, NetworkType
 from core.policy_engine import PolicyEngine, PolicyViolation
 from core.sandbox import Sandbox
 from tools.binance_tool import BinanceTool
@@ -30,6 +33,32 @@ from tools.wallet_tool import WalletTool
 from tools.whale_tool import WhaleConfig, WhaleTool
 
 logger = logging.getLogger(__name__)
+
+_DEBUG_LOG_PATH = Path(".cursor/debug.log")
+
+
+def _debug_log_agent(
+    hypothesis_id: str, location: str, message: str, data: dict[str, Any]
+) -> None:
+    """Append a single NDJSON debug line for agent swap instrumentation."""
+    # region agent log
+    payload = {
+        "sessionId": "debug-session",
+        "runId": "swap-debug-pre-fix",
+        "hypothesisId": hypothesis_id,
+        "location": location,
+        "message": message,
+        "data": data,
+        "timestamp": int(datetime.now().timestamp() * 1000),
+    }
+    try:
+        _DEBUG_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with _DEBUG_LOG_PATH.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(payload) + "\n")
+    except Exception:
+        # Never let debug logging break agent behaviour.
+        pass
+    # endregion
 
 # ── state ─────────────────────────────────────────────────────────────────────
 
@@ -97,9 +126,13 @@ def build_graph(
         temperature=0.3,
         max_tokens=2048,  # type: ignore[arg-type]
         default_headers={
-            "HTTP-Referer": "https://github.com/JustinGuese/kubernetes-docker-autonomous-trading-agent",
-            "X-Title": "aiAutonomousTraderBot",  # Optional. Site title for rankings on openrouter.ai.
-        }
+            "HTTP-Referer": (
+                "https://github.com/JustinGuese/"
+                "kubernetes-docker-autonomous-trading-agent"
+            ),
+            # Optional. Site title for rankings on openrouter.ai.
+            "X-Title": "aiAutonomousTraderBot",
+        },
     )
 
     browser_tool = BrowserTool()
@@ -125,6 +158,32 @@ def build_graph(
     whale_tool = WhaleTool(WhaleConfig(rpc_url=config.solana.rpc_url))
     onchain_tool = OnchainTool(OnchainConfig(rpc_url=config.solana.rpc_url))
     sentiment_tool = SentimentTool(SentimentConfig())
+
+    def _summarize_token_balances() -> tuple[dict[str, float], str]:
+        """Combine wallet and position data into a per-token balance summary."""
+        balances: dict[str, float] = {}
+        try:
+            balances = {k.upper(): float(v) for k, v in wallet_tool.get_all_balances().items()}
+        except Exception as exc:
+            logger.warning("  failed to fetch wallet token balances: %s", exc)
+            balances = {}
+
+        positions_state = memory.load().get("positions", {}) or {}
+        for symbol, pos in positions_state.items():
+            try:
+                amt = float(pos.get("amount", 0.0))
+            except Exception:
+                continue
+            sym = symbol.upper()
+            # Prefer on-chain wallet view when both exist; otherwise fall back to positions.
+            if sym not in balances:
+                balances[sym] = amt
+
+        if not balances:
+            return {}, "unavailable"
+
+        parts = [f"{sym}={balances.get(sym, 0.0):.4f}" for sym in sorted(balances.keys())]
+        return balances, ", ".join(parts)
 
     # ── PERCEIVE ──────────────────────────────────────────────────
     def perceive_node(state: AgentState) -> AgentState:
@@ -357,7 +416,18 @@ def build_graph(
         "For review_history, target is the number of past actions to pull (e.g. \"10\").\n"
         "For extend_code, params must include: code (string), "
         "commit_message (string).\n"
-        "For noop, params can be empty.\n"
+        "For noop, params can be empty.\n\n"
+
+        "--- POSITION & BALANCE CONSTRAINTS ---\n"
+        "You are always given a per-token balance summary (e.g. SOL=0.50, USDC=0.00).\n"
+        "Use this information when planning swaps:\n"
+        "- Only propose swaps FROM tokens where the balance is strictly positive.\n"
+        "- If a token's balance is 0 (e.g. USDC=0.00), never propose a swap that "
+        "spends that token (e.g. USDC→SOL) until you first acquire some.\n"
+        "- When you hold only SOL and no USDC, risk reduction should use SOL→USDC, "
+        "not USDC→SOL; only propose USDC→SOL when USDC balance is already > 0.\n"
+        "- Prefer directions and sizes that are actually executable given the "
+        "reported per-token balances.\n"
     )
 
     def reason_node(state: AgentState) -> AgentState:
@@ -374,6 +444,10 @@ def build_graph(
         today_spent = mem_state.get("daily_spend_sol", 0.0)
         logger.info("  daily spend so far: %.6f SOL", today_spent)
         last_two = history_tool.recent(2)
+
+        # Combined wallet + position view for the planner.
+        token_balances, token_summary = _summarize_token_balances()
+        logger.info("  per-token balances: %s", token_summary)
 
         # Estimate current portfolio performance versus a simple SOL buy-and-hold
         # using the latest TA-enriched close prices.
@@ -430,7 +504,8 @@ def build_graph(
             f"--- YOUR STATUS ---\n"
             f"Wallet balance: {balance} SOL\n"
             f"SOL spent today: {today_spent}\n"
-            f"Performance vs SOL buy-and-hold: {benchmark_summary}\n\n"
+            f"Performance vs SOL buy-and-hold: {benchmark_summary}\n"
+            f"Per-token balances: {token_summary}\n\n"
             f"--- YOUR LAST 2 ACTIONS ---\n"
             f"{last_two}\n\n"
             f"--- TODAY'S OBSERVATIONS ---\n"
@@ -571,9 +646,24 @@ def build_graph(
                 # tokens like USDC on devnet).
                 available = wallet_tool.balance_token(from_token)
                 if available < amount_sol:
-                    raise ValueError(
-                        f"Insufficient {from_token}: have {available}, need {amount_sol}"
-                    )
+                    if available <= 0:
+                        msg = (
+                            f"Swap skipped: 0 {from_token} balance; planner should not "
+                            "propose this direction."
+                        )
+                    else:
+                        msg = (
+                            "Swap skipped: insufficient "
+                            f"{from_token} balance; have {available}, need {amount_sol}"
+                        )
+                    logger.warning("  %s", msg)
+                    step = state.get("step", 0)
+                    return {
+                        **state,
+                        "action_result": msg,
+                        "step": step + 1,
+                        "last_action_type": action_type,
+                    }
 
                 # Approximate USD notional for policy using SOL price if available.
                 mem_state = memory.load()
@@ -587,8 +677,13 @@ def build_graph(
                     if symbol == "SOLUSDT":
                         sol_price = float(price_str)
                         break
-                amount_usd = amount_sol * sol_price if sol_price is not None else amount_sol
-                policy.check_swap(from_token, to_token, amount_usd)
+                amount_usd = (
+                    amount_sol * sol_price if sol_price is not None else amount_sol
+                )
+
+                # Network-aware policy checks (e.g. mainnet SOL balance floor).
+                network = NetworkDetector.detect(config.solana.rpc_url)
+                policy.check_swap(from_token, to_token, amount_usd, network)
 
                 # Convert SOL amount to lamports for input; for non-SOL tokens we
                 # still treat amount_sol as the SOL-equivalent notional for now.
@@ -609,7 +704,9 @@ def build_graph(
                         slippage_bps=slippage_bps,
                     )
 
-                is_mock_swap = isinstance(sig, str) and sig.startswith("DEVNET-MOCK-SWAP-")
+                is_mock_swap = isinstance(sig, str) and sig.startswith(
+                    "DEVNET-MOCK-SWAP-"
+                )
 
                 # Update in-memory positions: assume we swapped amount_sol worth of
                 # from_token into to_token at current SOL price. For devnet mock
@@ -647,11 +744,37 @@ def build_graph(
                 logger.info("  → swap sig: %s", sig)
                 memory.add_swap_usd(amount_usd)
 
+                # Persist an explicit mainnet transaction record for audit when
+                # running on mainnet and the swap was actually executed on-chain.
+                if network == NetworkType.MAINNET and not is_mock_swap:
+                    memory.append_mainnet_transaction(
+                        "swap",
+                        {
+                            "from_token": from_token,
+                            "to_token": to_token,
+                            "amount_sol": amount_sol,
+                            "amount_usd": amount_usd,
+                            "signature": sig,
+                            "prices": prices,
+                            "slippage_bps": slippage_bps,
+                        },
+                    )
+
             else:  # noop or unknown
                 logger.info("  noop")
                 result = "noop"
 
         except (PolicyViolation, Exception) as exc:
+            _debug_log_agent(
+                "H2",
+                "core/agent.py:act_node:swap_error",
+                "swap action raised exception",
+                {
+                    "error_type": type(exc).__name__,
+                    "error_str": str(exc),
+                    "action_type": action_type,
+                },
+            )
             result = f"action blocked/failed: {exc}"
             logger.warning("  action blocked/failed: %s", exc)
 

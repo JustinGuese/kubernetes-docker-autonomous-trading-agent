@@ -6,6 +6,7 @@ from urllib.parse import urlparse
 
 from core.config import AppConfig
 from core.memory import MemoryStore
+from core.network_config import NetworkType
 
 
 class PolicyViolation(Exception):
@@ -41,7 +42,13 @@ class PolicyEngine:
 
     # ── swaps ─────────────────────────────────────────────────────
 
-    def check_swap(self, from_token: str, to_token: str, amount_usd: float) -> None:
+    def check_swap(
+        self,
+        from_token: str,
+        to_token: str,
+        amount_usd: float,
+        network: NetworkType,
+    ) -> None:
         """Validate a proposed swap against policy rules.
 
         We approximate risk in USD terms; callers should pass an estimated USD
@@ -64,6 +71,21 @@ class PolicyEngine:
             raise PolicyViolation(
                 f"Projected daily swap volume {projected} exceeds cap {cfg.daily_swap_cap_usd}"
             )
+
+        # Mainnet-specific safeguard: prevent draining SOL below configured minimum.
+        if network == NetworkType.MAINNET and from_token.upper() == "SOL":
+            positions = state.get("positions", {}) or {}
+            current_sol = float(positions.get("SOL", {}).get("amount", 0.0))
+            min_balance = float(self.config.solana.mainnet_min_balance_sol)
+
+            # amount_usd is derived from SOL price in the agent; treat it as SOL
+            # notional for this safety check.
+            if current_sol - amount_usd < min_balance:
+                raise PolicyViolation(
+                    "Mainnet safety: swap would leave SOL balance below minimum "
+                    f"({min_balance} SOL). Current: {current_sol:.3f}, "
+                    f"requested: {amount_usd:.3f}"
+                )
 
     def check_swap_balance(self, wallet_tool, from_token: str, amount: float) -> None:
         """Optional policy-level pre-swap balance check.

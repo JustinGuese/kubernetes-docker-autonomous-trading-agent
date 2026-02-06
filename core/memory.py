@@ -37,6 +37,8 @@ _DEFAULT_STATE: dict[str, Any] = {
     "swap_history": [],
     "last_observations": "",
     "last_observations_prices": [],
+    # Mainnet transaction audit log (capped in append_mainnet_transaction).
+    "mainnet_transactions": [],
 }
 
 # How many chars of action_result to persist per trade
@@ -221,6 +223,33 @@ class MemoryStore:
         state = self.load()
         trades = state.get("trades", [])
         return list(reversed(trades[-n:]))
+
+    # ── mainnet transaction log ─────────────────────────────────────
+
+    def append_mainnet_transaction(self, tx_type: str, details: dict[str, Any]) -> None:
+        """Append a mainnet transaction record for audit purposes.
+
+        This log is capped to a reasonable length to avoid unbounded growth.
+        """
+        from datetime import datetime
+
+        state = self.load()
+        log = state.get("mainnet_transactions") or []
+        if not isinstance(log, list):
+            log = []
+
+        log.append(
+            {
+                "timestamp": datetime.now().isoformat(),
+                "date": date.today().isoformat(),
+                "type": tx_type,
+                "details": details,
+                "chain": "solana-mainnet",
+            }
+        )
+        # Keep only the last 500 mainnet transactions.
+        state["mainnet_transactions"] = log[-500:]
+        self.save(state)
 
     # ── observation compression ─────────────────────────────────────
 

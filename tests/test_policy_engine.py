@@ -8,6 +8,7 @@ import pytest
 
 from core.config import AppConfig, GitConfig, LLMConfig, MemoryConfig, PolicyConfig, SolanaConfig
 from core.memory import MemoryStore
+from core.network_config import NetworkType
 from core.policy_engine import PolicyEngine, PolicyViolation
 
 # ── fixtures ──────────────────────────────────────────────────────────────────
@@ -162,26 +163,54 @@ class TestSwap:
 
     def test_same_token_raises(self, engine: PolicyEngine) -> None:
         with pytest.raises(PolicyViolation, match="must differ"):
-            engine.check_swap("SOL", "SOL", 10.0)
+            engine.check_swap("SOL", "SOL", 10.0, NetworkType.DEVNET)
 
     def test_zero_amount_raises(self, engine: PolicyEngine) -> None:
         with pytest.raises(PolicyViolation, match="must be positive"):
-            engine.check_swap("SOL", "USDC", 0.0)
+            engine.check_swap("SOL", "USDC", 0.0, NetworkType.DEVNET)
 
     def test_negative_amount_raises(self, engine: PolicyEngine) -> None:
         with pytest.raises(PolicyViolation, match="must be positive"):
-            engine.check_swap("SOL", "USDC", -5.0)
+            engine.check_swap("SOL", "USDC", -5.0, NetworkType.DEVNET)
 
     def test_exceeds_per_tx_cap_raises(self, engine: PolicyEngine) -> None:
         # Default max_swap_usd_per_tx is 50
         with pytest.raises(PolicyViolation, match="MAX_SWAP_USD_PER_TX"):
-            engine.check_swap("SOL", "USDC", 51.0)
+            engine.check_swap("SOL", "USDC", 51.0, NetworkType.DEVNET)
 
     def test_exceeds_daily_cap_raises(self, memory: MemoryStore) -> None:
         memory.add_swap_usd(180.0)  # default daily_swap_cap_usd is 200
         eng = PolicyEngine(_make_config(), memory)
         with pytest.raises(PolicyViolation, match="daily swap volume"):
-            eng.check_swap("SOL", "USDC", 25.0)
+            eng.check_swap("SOL", "USDC", 25.0, NetworkType.DEVNET)
 
     def test_within_limits_passes(self, engine: PolicyEngine) -> None:
-        engine.check_swap("SOL", "USDC", 10.0)
+        engine.check_swap("SOL", "USDC", 10.0, NetworkType.DEVNET)
+
+
+class TestSwapMainnetSafety:
+    def test_mainnet_sol_swap_respects_min_balance(self, tmp_path: Path) -> None:
+        """Mainnet SOL swap should not drain below configured minimum balance."""
+        mem = MemoryStore(path=tmp_path / "mem_mainnet.json")
+        state = mem.load()
+        # Seed a SOL position of 0.5
+        state["positions"] = {"SOL": {"amount": 0.5}}
+        mem.save(state)
+
+        cfg = _make_config()
+        # Ensure a specific minimum balance for the test.
+        cfg.solana = cfg.solana.__class__(
+            private_key=cfg.solana.private_key,
+            rpc_url="https://api.mainnet-beta.solana.com",
+            jupiter_api_key=cfg.solana.jupiter_api_key,
+            whale_wallets=cfg.solana.whale_wallets,
+            mainnet_min_balance_sol=0.1,
+        )
+        eng = PolicyEngine(cfg, mem)
+
+        # Swapping 0.35 SOL-equivalent should leave 0.15 SOL (> 0.1) → allowed.
+        eng.check_swap("SOL", "USDC", 0.35, NetworkType.MAINNET)
+
+        # Swapping 0.45 SOL-equivalent would leave 0.05 (< 0.1) → blocked.
+        with pytest.raises(PolicyViolation, match="Mainnet safety"):
+            eng.check_swap("SOL", "USDC", 0.45, NetworkType.MAINNET)

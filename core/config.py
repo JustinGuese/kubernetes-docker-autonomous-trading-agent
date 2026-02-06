@@ -18,6 +18,7 @@ ALLOWED_SCRAPE_DOMAINS: frozenset[str] = frozenset(
         "coinmarketcap.com",
         "solana.com",
         "solprice.com",
+        "alternative.me",
     }
 )
 
@@ -37,6 +38,8 @@ class SolanaConfig:
     jupiter_api_key: str | None = None  # Required for Jupiter Ultra swap API (get at portal.jup.ag)
     # Optional list of whale wallets for on-chain/whale tools; comma-separated.
     whale_wallets: tuple[str, ...] = ()
+    # Mainnet safety controls: minimum SOL balance to keep after swaps.
+    mainnet_min_balance_sol: float = 0.1
 
 
 @dataclass(frozen=True)
@@ -102,6 +105,9 @@ def load_config() -> AppConfig:
             private_key=_require("SOLANA_PRIVATE_KEY"),
             rpc_url=_getenv("SOLANA_RPC_URL", "https://api.devnet.solana.com"),  # type: ignore[arg-type]
             jupiter_api_key=_getenv("JUPITER_API_KEY"),  # type: ignore[arg-type]
+            mainnet_min_balance_sol=float(
+                _getenv("SOLANA_MAINNET_MIN_BALANCE", "0.1")
+            ),  # type: ignore[arg-type]
         ),
         policy=PolicyConfig(
             confidence_threshold=float(_getenv("CONFIDENCE_THRESHOLD", "0.6")),  # type: ignore[arg-type]

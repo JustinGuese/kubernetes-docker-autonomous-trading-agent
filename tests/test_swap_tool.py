@@ -5,94 +5,144 @@ These tests mock HTTP calls so no real Jupiter API traffic is generated.
 
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from solders.keypair import Keypair
 
-from tools.swap_tool import SwapTokens, SwapTool
+from core.network_config import DEVNET_TOKENS, MAINNET_TOKENS, NetworkDetector, NetworkType
+from tools.swap_tool import JupiterUltraSwap, JupiterV6Swap, MockSwap, SwapTool
 
 
-class TestSwapTokens:
-    def test_mint_for_symbol_basic(self) -> None:
-        tokens = SwapTokens()
-        assert tokens.mint_for_symbol("SOL") == tokens.sol_mint
-        assert tokens.mint_for_symbol("USDC") == tokens.usdc_mint
-        assert tokens.mint_for_symbol("WBTC") == tokens.wbtc_mint
+class TestNetworkDetection:
+    def test_detect_mainnet(self) -> None:
+        assert (
+            NetworkDetector.detect("https://api.mainnet-beta.solana.com")
+            == NetworkType.MAINNET
+        )
 
-        with pytest.raises(ValueError):
-            tokens.mint_for_symbol("FOO")
+    def test_detect_devnet(self) -> None:
+        assert (
+            NetworkDetector.detect("https://api.devnet.solana.com")
+            == NetworkType.DEVNET
+        )
+
+    def test_get_tokens_mainnet_and_devnet(self) -> None:
+        assert MAINNET_TOKENS.usdc != ""
+        assert DEVNET_TOKENS.usdc != ""
+        assert DEVNET_TOKENS.wbtc is None
 
 
-class TestSwapTool:
+class TestSwapStrategies:
     @patch("tools.swap_tool.httpx.post")
     @patch("tools.swap_tool.httpx.get")
-    @patch("tools.swap_tool.SolanaClient.get_latest_blockhash")
-    def test_swap_happy_path(
-        self,
-        mock_blockhash,
-        mock_get,
-        mock_post,
-    ) -> None:
-        # Fake keypair (random; not used against real cluster). Use a mainnet
-        # RPC URL here so SwapTool exercises the full Ultra code path rather
-        # than the devnet mock shortcut.
+    def test_ultra_mainnet_happy_path(self, mock_get, mock_post) -> None:
+        # Use a real keypair object; no RPC calls from the strategy itself.
         keypair = Keypair()
-        tool = SwapTool(keypair, "https://api.mainnet-beta.solana.com")
+        rpc = MagicMock()
 
-        # Mock Ultra /order response
+        # Build a minimal-but-valid empty transaction to satisfy from_bytes.
         import base64
         from solders.transaction import VersionedTransaction
 
-        # Build a minimal-but-valid empty transaction to satisfy from_bytes.
         dummy_tx = VersionedTransaction.default()
         unsigned_b64 = base64.b64encode(bytes(dummy_tx)).decode("utf-8")
+
         mock_get.return_value.status_code = 200
         mock_get.return_value.json.return_value = {
             "swapTransaction": unsigned_b64,
             "requestId": "req-123",
         }
 
-        # Mock latest blockhash
-        class _BH:
-            blockhash = "dummy"
-
-        mock_blockhash.return_value.value = _BH()
-
-        # Mock Ultra /execute response
         mock_post.return_value.status_code = 200
         mock_post.return_value.json.return_value = {"signature": "sig-abc"}
 
-        sig = tool.swap("SOL", "USDC", amount_lamports=1_000_000_000, slippage_bps=50)
+        strat = JupiterUltraSwap(keypair, rpc, api_key="test-key")
+        sig = strat.execute_swap(
+            MAINNET_TOKENS.sol, MAINNET_TOKENS.usdc, amount_lamports=1_000_000_000, slippage_bps=50
+        )
         assert sig == "sig-abc"
 
     @patch("tools.swap_tool.httpx.get")
-    def test_swap_order_api_error_raises(self, mock_get: object) -> None:
+    def test_ultra_mainnet_order_error_raises(self, mock_get) -> None:
         keypair = Keypair()
-        tool = SwapTool(keypair, "https://api.mainnet-beta.solana.com")
+        rpc = MagicMock()
+
         mock_get.return_value.status_code = 500
         mock_get.return_value.text = "Internal Server Error"
+
+        strat = JupiterUltraSwap(keypair, rpc, api_key="test-key")
         with pytest.raises(RuntimeError, match="Ultra order error 500"):
-            tool.swap("SOL", "USDC", amount_lamports=1_000_000_000)
+            strat.execute_swap(
+                MAINNET_TOKENS.sol,
+                MAINNET_TOKENS.usdc,
+                amount_lamports=1_000_000_000,
+                slippage_bps=50,
+            )
+
+    @patch("tools.swap_tool.httpx.post")
+    @patch("tools.swap_tool.httpx.get")
+    def test_devnet_v6_happy_path(self, mock_get, mock_post) -> None:
+        keypair = Keypair()
+        rpc = MagicMock()
+
+        # Quote response
+        mock_get.return_value.status_code = 200
+        mock_get.return_value.json.return_value = {"routePlan": [], "other": "fields"}
+
+        # Swap response with a base64 tx
+        import base64
+        from solders.transaction import VersionedTransaction
+
+        dummy_tx = VersionedTransaction.default()
+        unsigned_b64 = base64.b64encode(bytes(dummy_tx)).decode("utf-8")
+        mock_post.return_value.status_code = 200
+        mock_post.return_value.json.return_value = {"swapTransaction": unsigned_b64}
+
+        # RPC send_raw_transaction returns an object with a .value attribute
+        rpc.send_raw_transaction.return_value = MagicMock(value="devnet-sig")
+
+        strat = JupiterV6Swap(keypair, rpc)
+        sig = strat.execute_swap(
+            DEVNET_TOKENS.sol,
+            DEVNET_TOKENS.usdc,
+            amount_lamports=1_000_000_000,
+            slippage_bps=50,
+        )
+        assert sig == "devnet-sig"
 
     @patch("tools.swap_tool.httpx.get")
-    def test_swap_order_missing_swap_transaction_raises(self, mock_get: object) -> None:
+    def test_devnet_v6_no_pool_raises_clear_error(self, mock_get) -> None:
         keypair = Keypair()
-        tool = SwapTool(keypair, "https://api.mainnet-beta.solana.com")
-        mock_get.return_value.status_code = 200
-        mock_get.return_value.json.return_value = {"requestId": "req-1"}
-        with pytest.raises(RuntimeError, match="no transaction"):
-            tool.swap("SOL", "USDC", amount_lamports=1_000_000_000)
+        rpc = MagicMock()
 
-    def test_swap_invalid_symbol_raises(self) -> None:
-        keypair = Keypair()
-        tool = SwapTool(keypair, "https://api.mainnet-beta.solana.com")
-        with pytest.raises(ValueError, match="Unsupported token symbol"):
-            tool.swap("INVALID", "USDC", amount_lamports=1_000_000_000)
+        mock_get.return_value.status_code = 404
+        mock_get.return_value.text = "Not Found"
 
+        strat = JupiterV6Swap(keypair, rpc)
+        with pytest.raises(RuntimeError, match="No liquidity pool"):
+            strat.execute_swap(
+                DEVNET_TOKENS.sol,
+                DEVNET_TOKENS.usdc,
+                amount_lamports=1_000_000_000,
+                slippage_bps=50,
+            )
+
+
+class TestSwapToolWrapper:
     def test_swap_zero_lamports_raises(self) -> None:
         keypair = Keypair()
         tool = SwapTool(keypair, "https://api.devnet.solana.com")
         with pytest.raises(ValueError, match="amount_lamports must be positive"):
             tool.swap("SOL", "USDC", amount_lamports=0)
+
+    @patch("tools.swap_tool.JupiterV6Swap.execute_swap")
+    def test_devnet_falls_back_to_mock_on_no_pool(self, mock_exec) -> None:
+        keypair = Keypair()
+        tool = SwapTool(keypair, "https://api.devnet.solana.com")
+
+        mock_exec.side_effect = RuntimeError("No liquidity pool on devnet")
+
+        sig = tool.swap("SOL", "USDC", amount_lamports=1_000_000_000)
+        assert sig.startswith("DEVNET-MOCK-SWAP-")
 

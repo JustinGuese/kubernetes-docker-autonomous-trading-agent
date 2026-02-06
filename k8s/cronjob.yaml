@@ -38,13 +38,13 @@ spec:
           volumes:
           - name: memory-pvc
             persistentVolumeClaim:
-              claimName: trader-bot-memory
+              claimName: trading-bot-memory
 
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: trader-bot-memory
+  name: trading-bot-memory
   namespace: autonomoustrading
 spec:
   accessModes:

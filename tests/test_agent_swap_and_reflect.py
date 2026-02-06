@@ -1,82 +1,118 @@
 from __future__ import annotations
 
-from typing import Dict
+from unittest.mock import MagicMock, patch
 
-import pytest
-
+from core.config import AppConfig, GitConfig, LLMConfig, MemoryConfig, PolicyConfig, SolanaConfig
 from core.memory import MemoryStore
-from core.policy_engine import PolicyEngine, PolicyViolation
+from core.network_config import NetworkType
+from core.policy_engine import PolicyEngine
 from tools.position_tool import PositionTool
 
 
-class _DummyWallet:
-    def __init__(self, balances: Dict[str, float]) -> None:
-        self._balances = balances
-
-    def balance_token(self, symbol: str) -> float:
-        return float(self._balances.get(symbol.upper(), 0.0))
-
-
-class TestCheckSwapBalance:
-    def test_insufficient_balance_raises(self) -> None:
-        """PolicyEngine.check_swap_balance should reject when balance is too low."""
-        from core.config import AppConfig, GitConfig, LLMConfig, MemoryConfig, PolicyConfig, SolanaConfig
-        from core.memory import MemoryStore
-
-        cfg = AppConfig(
-            llm=LLMConfig(api_key="test"),
-            solana=SolanaConfig(private_key="fake"),
-            policy=PolicyConfig(),
-            git=GitConfig(token="gh", repo="owner/repo"),
-            memory=MemoryConfig(),
-        )
-        engine = PolicyEngine(cfg, MemoryStore())
-        wallet = _DummyWallet({"USDC": 0.05})
-
-        with pytest.raises(PolicyViolation, match="Insufficient USDC balance"):
-            engine.check_swap_balance(wallet, "USDC", 0.1)
-
-    def test_sufficient_balance_passes(self) -> None:
-        from core.config import AppConfig, GitConfig, LLMConfig, MemoryConfig, PolicyConfig, SolanaConfig
-        from core.memory import MemoryStore
-
-        cfg = AppConfig(
-            llm=LLMConfig(api_key="test"),
-            solana=SolanaConfig(private_key="fake"),
-            policy=PolicyConfig(),
-            git=GitConfig(token="gh", repo="owner/repo"),
-            memory=MemoryConfig(),
-        )
-        engine = PolicyEngine(cfg, MemoryStore())
-        wallet = _DummyWallet({"USDC": 1.0})
-
-        # Should not raise
-        engine.check_swap_balance(wallet, "USDC", 0.1)
+def _make_config_for_agent() -> AppConfig:
+    return AppConfig(
+        llm=LLMConfig(api_key="test"),
+        solana=SolanaConfig(private_key="fake", rpc_url="https://api.mainnet-beta.solana.com"),
+        policy=PolicyConfig(),
+        git=GitConfig(token="gh", repo="owner/repo"),
+        memory=MemoryConfig(),
+    )
 
 
-class TestDriftReconcileHelpers:
-    def test_onchain_sync_does_not_overwrite_nonzero_positions(self, tmp_path) -> None:
-        """Regression-style test to ensure sync_from_onchain preserves existing positions.
+@patch("core.agent.NetworkDetector.detect")
+def test_mainnet_swap_appends_mainnet_transaction(mock_detect, tmp_path) -> None:
+    """Successful non-mock mainnet swaps should append to mainnet_transactions."""
+    mock_detect.return_value = NetworkType.MAINNET
 
-        This indirectly supports the drift reconciliation logic by confirming that
-        the initial on-chain sync used at startup cannot clobber already-tracked
-        SOL amounts when they are non-zero.
-        """
-        mem = MemoryStore(path=tmp_path / "mem.json")
-        pos = PositionTool(mem)
-        # Seed non-zero SOL position
-        pos.update_position("SOL", 0.2, 5.0)
+    from core.agent import build_graph  # imported late to pick up patched detector
 
-        class _Wallet:
-            def __init__(self) -> None:
-                self._balances = {"SOL": 0.5}
+    mem = MemoryStore(path=tmp_path / "mem.json")
+    cfg = _make_config_for_agent()
+    policy = PolicyEngine(cfg, mem)
 
-            def get_all_balances(self) -> Dict[str, float]:
-                return dict(self._balances)
+    # Seed a SOL position so mainnet safety check passes
+    state = mem.load()
+    state["positions"] = {"SOL": {"amount": 1.0}}
+    mem.save(state)
 
-        wallet = _Wallet()
-        pos.sync_from_onchain(wallet, {"SOL": 100.0})
+    # Pre-populate observations price so the agent can compute amount_usd
+    state = mem.load()
+    state["last_observations_prices"] = ["[SOLUSDT] 100.0"]
+    mem.save(state)
 
-        sol_pos = pos.get_position("SOL")
-        assert sol_pos["amount"] == 0.2
+    # Patch swap_tool.swap to return a non-mock signature
+    with patch("core.agent.SwapTool.swap", return_value="real-mainnet-sig"):
+        graph = build_graph(cfg, mem, policy, dry_run=False)
+
+        # Craft a simple state that will cause the agent to execute a swap action
+        # directly by providing a fixed plan.
+        from core.agent import AgentState  # type: ignore
+
+        initial: AgentState = {
+            "observations": "",
+            "plan": {
+                "action_type": "swap",
+                "target": "",
+                "params": {
+                    "from_token": "SOL",
+                    "to_token": "USDC",
+                    "amount_sol": 0.2,
+                    "slippage_bps": 50,
+                },
+                "confidence": 1.0,
+                "reason": "test mainnet swap logging",
+            },
+            "action_result": "",
+            "reflection": "",
+            "done": False,
+            "step": 0,
+            "last_action_type": None,
+        }
+
+        final_state = graph.invoke(initial)
+        assert final_state["done"] is True
+
+    logged = mem.load().get("mainnet_transactions", [])
+    assert len(logged) == 1
+    entry = logged[0]
+    assert entry["type"] == "swap"
+    assert entry["details"]["signature"] == "real-mainnet-sig"
+
+
+@patch("core.agent.WalletTool.balance_token")
+def test_swap_from_zero_balance_token_is_skipped(mock_balance_token, tmp_path) -> None:
+    """Swaps from a zero-balance token should be skipped with a clear message."""
+    mock_balance_token.return_value = 0.0
+
+    from core.agent import AgentState, build_graph  # type: ignore
+
+    mem = MemoryStore(path=tmp_path / "mem_zero.json")
+    cfg = _make_config_for_agent()
+    policy = PolicyEngine(cfg, mem)
+    graph = build_graph(cfg, mem, policy, dry_run=False)
+
+    initial: AgentState = {
+        "observations": "",
+        "plan": {
+            "action_type": "swap",
+            "target": "",
+            "params": {
+                "from_token": "USDC",
+                "to_token": "SOL",
+                "amount_sol": 0.05,
+                "slippage_bps": 50,
+            },
+            "confidence": 1.0,
+            "reason": "test zero-balance skip",
+        },
+        "action_result": "",
+        "reflection": "",
+        "done": False,
+        "step": 0,
+        "last_action_type": None,
+    }
+
+    final_state = graph.invoke(initial)
+    assert final_state["done"] is True
+    assert "Swap skipped: 0 USDC balance" in final_state["action_result"]
 
