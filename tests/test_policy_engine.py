@@ -251,3 +251,23 @@ class TestSwapMainnetSafety:
             network=NetworkType.MAINNET,
             amount_native=0.1,
         )
+
+    def test_mainnet_sol_swap_requires_amount_native(self, tmp_path: Path) -> None:
+        """Mainnet SOL swap must receive amount_native; must not use USD as SOL."""
+        mem = MemoryStore(path=tmp_path / "mem_mainnet_require_native.json")
+        state = mem.load()
+        state["positions"] = {"SOL": {"amount": 0.5}}
+        mem.save(state)
+        cfg = _make_config(
+            solana_rpc_url="https://api.mainnet-beta.solana.com",
+            mainnet_min_balance_sol=0.1,
+        )
+        eng = PolicyEngine(cfg, mem)
+        with pytest.raises(PolicyViolation, match="amount_native"):
+            eng.check_swap(
+                "SOL",
+                "USDC",
+                amount_usd=10.0,
+                network=NetworkType.MAINNET,
+                amount_native=None,
+            )

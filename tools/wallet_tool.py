@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import logging
 import time
+from typing import Callable, TypeVar
 
 import base58
+import httpx
 from solana.rpc.api import Client
 from solana.rpc.types import TokenAccountOpts
 from solders.keypair import Keypair
@@ -20,6 +22,49 @@ logger = logging.getLogger(__name__)
 _LAMPORTS_PER_SOL = 1_000_000_000
 
 TOKEN_DECIMALS = {"SOL": 9, "USDC": 6, "WBTC": 8}
+
+# Retries for transient RPC errors (e.g. 429 rate limit) so balance checks
+# don't cause valid swaps to be skipped.
+_RPC_RETRY_ATTEMPTS = 3
+_RPC_RETRY_BACKOFF_S = (1.0, 2.0, 4.0)
+
+
+def _is_retryable_rpc_error(exc: BaseException) -> bool:
+    """True if the exception looks like a transient/rate-limit RPC error."""
+    msg = str(exc).lower()
+    if "429" in msg or "too many requests" in msg or "rate" in msg:
+        return True
+    if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code == 429:
+        return True
+    return False
+
+
+T = TypeVar("T")
+
+
+def _rpc_with_retry(fn: Callable[[], T]) -> T:
+    """Call fn(); on retryable RPC errors, back off and retry up to _RPC_RETRY_ATTEMPTS."""
+    last: BaseException | None = None
+    for attempt in range(_RPC_RETRY_ATTEMPTS):
+        try:
+            return fn()
+        except BaseException as e:
+            last = e
+            if attempt < _RPC_RETRY_ATTEMPTS - 1 and _is_retryable_rpc_error(e):
+                delay = _RPC_RETRY_BACKOFF_S[attempt]
+                logger.warning(
+                    "RPC retryable error (attempt %d/%d), retrying in %.1fs: %s",
+                    attempt + 1,
+                    _RPC_RETRY_ATTEMPTS,
+                    delay,
+                    e,
+                )
+                time.sleep(delay)
+            else:
+                raise
+    if last is not None:
+        raise last
+    raise RuntimeError("unreachable")
 
 
 class WalletTool:
@@ -40,7 +85,7 @@ class WalletTool:
     def balance_sol(self) -> float:
         """Return current balance in SOL (float)."""
         logger.info("fetching balance for %s", self.pubkey)
-        resp = self.client.get_balance(self.pubkey)
+        resp = _rpc_with_retry(lambda: self.client.get_balance(self.pubkey))
         sol = resp.value / _LAMPORTS_PER_SOL
         logger.info("  → %.6f SOL (%d lamports)", sol, resp.value)
         return sol
@@ -81,10 +126,13 @@ class WalletTool:
         # them at call time. On devnet, some mainnet mints may not exist; in
         # that case treat RPC errors as "no balance" rather than surfacing
         # low-level InvalidParamsMessage exceptions to callers.
+        # Transient errors (e.g. 429) are retried with backoff so trades aren't skipped.
         try:
-            resp = self.client.get_token_accounts_by_owner(
-                self.pubkey,
-                TokenAccountOpts(mint=Pubkey.from_string(mint)),
+            resp = _rpc_with_retry(
+                lambda: self.client.get_token_accounts_by_owner(
+                    self.pubkey,
+                    TokenAccountOpts(mint=Pubkey.from_string(mint)),
+                )
             )
         except Exception as exc:
             logger.warning(
@@ -103,7 +151,9 @@ class WalletTool:
                 acct_pubkey = getattr(acc, "pubkey", None) or getattr(acc, "pubkey", None)
                 if acct_pubkey is None:
                     continue
-                balance_resp = self.client.get_token_account_balance(acct_pubkey)
+                balance_resp = _rpc_with_retry(
+                    lambda pk=acct_pubkey: self.client.get_token_account_balance(pk)
+                )
                 val = getattr(balance_resp, "value", None)
                 if val is None:
                     continue

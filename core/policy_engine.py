@@ -74,19 +74,23 @@ class PolicyEngine:
             )
 
         # Mainnet-specific safeguard: prevent draining SOL below configured minimum.
+        # We must use the native SOL amount here; never use amount_usd (USD notional)
+        # as spend_sol or we wrongly block (e.g. "requested: 8.307" when 8.3 was USD).
         if network == NetworkType.MAINNET and from_token.upper() == "SOL":
+            if amount_native is None:
+                raise PolicyViolation(
+                    "Mainnet safety: SOL swap requires amount_native for minimum "
+                    "balance check (do not use USD amount as SOL)."
+                )
             positions = state.get("positions", {}) or {}
             current_sol = float(positions.get("SOL", {}).get("amount", 0.0))
             min_balance = float(self.config.solana.mainnet_min_balance_sol)
-
-            # Use the native SOL amount when available; fall back to the USD-derived
-            # estimate (treated as SOL notional) for backwards compatibility.
-            spend_sol = amount_native if amount_native is not None else amount_usd
+            spend_sol = amount_native
             if current_sol - spend_sol < min_balance:
                 raise PolicyViolation(
                     "Mainnet safety: swap would leave SOL balance below minimum "
                     f"({min_balance} SOL). Current: {current_sol:.3f}, "
-                    f"requested: {spend_sol:.3f}"
+                    f"requested: {spend_sol:.3f} SOL"
                 )
 
     def check_swap_balance(self, wallet_tool, from_token: str, amount: float) -> None:
